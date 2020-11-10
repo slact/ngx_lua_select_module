@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/usr/bin/env zsh
 MY_PATH="`dirname \"$0\"`"
 MY_PATH="`( cd \"$MY_PATH\" && pwd )`"
 pkg_path=$MY_PATH/nginx-pkg
@@ -17,12 +17,15 @@ export WITH_HTTP_SSL=1
 export CONFIGURE_WITH_DEBUG=0
 _extra_config_opt=()
 
-export WITH_LUA_MODULE=1
+#export WITH_LUA_MODULE=1
 
 for opt in $*; do
   case $opt in
     clang)
       export CC=$_clang;;
+    coverage)
+      export CC="$_clang -fprofile-instr-generate -fcoverage-mapping"
+      ;;
     clang-sanitize|sanitize|sanitize-memory)
       export CC="CMAKE_LD=llvm-link $_clang -Xclang -cc1 $clang_sanitize_memory "
       export CLINKER=$clang
@@ -32,12 +35,18 @@ for opt in $*; do
       ;;
     sanitize-address)
       export CC="$_clang $clang_sanitize_addres";;
+    gcc)
+      export CC="gcc";;
+    gcc6)
+      export CC="ccache gcc-6";;
     gcc5)
-      export CC=gcc-5;;
+      export CC="ccache gcc-5";;
     gcc4|gcc47|gcc4.7)
-      export CC=gcc-4.7;;
+      export CC="ccache gcc-4.7";;
     nopool|no-pool|nop) 
       export NO_POOL=1;;
+    trackpool|track-pool) 
+      export TRACK_POOL=1;;
     debug-pool|debugpool) 
       export NGX_DEBUG_POOL=1;;
     dynamic)
@@ -55,6 +64,8 @@ for opt in $*; do
       export NO_DEBUG=1;;
     echo_module)
       export WITH_NGX_ECHO_MODULE=1;;
+    pagespeed)
+      export WITH_NGX_PAGESPEED_MODULE=1;;
     O0)
       optimize_level=0;;
     O1)
@@ -63,6 +74,8 @@ for opt in $*; do
       optimize_level=2;;
     O3)
       optimize_level=3;;
+    Og)
+      optimize_level=g;;
     mudflap)
       export MUDFLAP=1
       export CC=gcc
@@ -98,10 +111,16 @@ for opt in $*; do
       export DEFAULT_PREFIX=1;;
     prefix=*)
       export CUSTOM_PREFIX="${opt:7}";;
+    explicit_cflags)
+      export EXPLICIT_CFLAGS=1
+      ;;
     openresty)
       export EXPLICIT_CFLAGS=1
       export WITH_LUA_MODULE=""
       export USE_OPENRESTY=1
+      ;;
+    openssl1.0)
+      export USE_OPENSSL_10=1
       ;;
     openresty=*)
       export OPENRESTY_CUSTOM_VERSION="${opt:10}"
@@ -126,8 +145,10 @@ for opt in $*; do
 done
 
 export NO_WITH_DEBUG=$NO_WITH_DEBUG;
-export EXTRA_CONFIG_OPT=`echo $_extra_config_opt`
+export EXTRA_CONFIG_OPT="`echo $_extra_config_opt`"
 
+
+echo $EXTRA_CONFIG_OPT
 _build_nginx() {
 
   if type "makepkg" > /dev/null; then
@@ -190,6 +211,7 @@ _build_nginx() {
 
   rm "${srcdir}/nginx"
   ln -sf "${srcdir}/${_extracted_dir}" "${srcdir}/nginx"
+  ln -sf "${startdir}/nchan" "${srcdir}/nchan"
   
   build
 
@@ -204,31 +226,6 @@ export OPTIMIZE_LEVEL=$optimize_level
 
 if [[ -z $NO_MAKE ]]; then
   
-  #./gen_config_commands.rb
-  #if ! [ $? -eq 0 ]; then; 
-  #  echo "failed generating nginx directives"; 
-  #  exit 1
-  #fi
-  
-  #if [[ -n $RELEASE ]]; then
-  #  ./redocument.rb --release $RELEASE
-  #else
-  #  ./redocument.rb
-  #fi
-  #if ! [ $? -eq 0 ]; then; 
-  #  echo "failed generating documentation"; 
-  #  exit 1
-  #fi
-
-  bundle exec hsss --format split \
-    --no-hashes --no-name --no-each --no-count --no-static \
-    --struct ngx_ipc_lua_scripts_t \
-    --scripts ngx_ipc_lua_scripts \
-    "${_src_dir}"/lua/* > "${_src_dir}/ngx_lua_ipc_scripts.h"
-  if ! [ $? -eq 0 ]; then;
-    echo "failed generating redis lua scripts";
-    exit 1
-  fi  
   pushd $pkg_path >/dev/null
   
   _build_nginx

@@ -144,7 +144,7 @@ if [[ ! -z $ALTPORT ]]; then
   sed "s|^\(\s\+\)listen\(\s\+\)\(.*\)|\1listen\21\3|g" $NGINX_TEMP_CONFIG -i
 fi
 
-conf_replace "access_log" $ACCESS_LOG
+#conf_replace "access_log" $ACCESS_LOG
 conf_replace "error_log" "$ERROR_LOG $ERRLOG_LEVEL"
 conf_replace "worker_processes" $WORKERS
 conf_replace "daemon" $NGINX_DAEMON
