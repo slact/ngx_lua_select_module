@@ -1,5 +1,5 @@
-#include "ngx_global_counter_var.h"
 #include <ngx_http.h>
+#include "ngx_global_counter_var.h"
 #include <assert.h>
 
 ngx_atomic_uint_t *ngx_global_counter = NULL;
@@ -13,10 +13,14 @@ static void set_varval(ngx_http_variable_value_t *v, u_char *data, size_t len) {
 }
 
 static ngx_int_t ngx_http_global_counter_var_get_handler(ngx_http_request_t *r, ngx_http_variable_value_t *v, uintptr_t data) {
-  u_char                *buf = ngx_palloc(r->pool, NGX_INT_T_LEN + 1);
+  u_char                *buf = ngx_http_get_module_ctx(r, ngx_http_global_counter_var_module);
   if(!buf) {
-    v->valid = 0;
-    return NGX_ERROR;
+    buf = ngx_palloc(r->pool, NGX_INT_T_LEN + 1);
+    if(!buf) {
+      v->valid = 0;
+      return NGX_ERROR;
+    }
+    ngx_http_set_ctx(r, buf, ngx_http_global_counter_var_module);
   }
   
   ngx_atomic_uint_t     current_val = ngx_atomic_fetch_add(ngx_global_counter, 1);
