@@ -1,42 +1,24 @@
-ngx_addon_name=ngx_http_global_counter_var_module
+ngx_addon_name=ngx_lua_select_module
 
-ngx_module_deps="${ngx_addon_dir}/src/ngx_global_counter_var.h"
+ngx_module_deps="${ngx_addon_dir}/src/ngx_lua_select.h"
 ngx_module_incs="${ngx_addon_dir}/src"
 . auto/have
 
-#ngx_module_type=CORE
-#ngx_module_name=ngx_global_counter_var_module
-#ngx_module_srcs="${ngx_addon_dir}/src/ngx_global_counter_var.c"
-#ngx_module_libs=$ngx_feature_libs
-#. auto/module
 echo `pwd`
 echo $ngx_addon_dir
 
-#if [ $ngx_module_link = DYNAMIC ] ; then
-  ngx_module_type=HTTP
-  ngx_module_name=ngx_http_global_counter_var_module
-  ngx_module_srcs="${ngx_addon_dir}/src/ngx_http_global_counter_var.c"
-  ngx_module_libs=$ngx_feature_libs
-  . auto/module
+ngx_module_type=HTTP
+ngx_module_name=ngx_http_lua_select_module
+ngx_module_srcs="${ngx_addon_dir}/src/ngx_http_lua_select_module.c"
+ngx_module_libs=$ngx_feature_libs
+. auto/module
 
-  if [ $STREAM = NO ]; then
-    echo "Skipping ngx_global_counter_var_module for ngx_stream_module"
-  else
-    ngx_module_type=STREAM
-    ngx_module_name=ngx_stream_global_counter_var_module
-    ngx_module_srcs="${ngx_addon_dir}/src/ngx_stream_global_counter_var.c"
-    ngx_module_libs=$ngx_feature_libs
-    . auto/module
-  fi
-#else
-#  ngx_module_type=HTTP
-#  ngx_module_name="ngx_http_global_counter_var_module"
-#  ngx_module_srcs="${ngx_addon_dir}/src/ngx_http_global_counter_var.c"
-#  if [ $STREAM = NO ]; then
-#    echo "Skipping ngx_global_counter_var_module for ngx_stream_module"
-#  else
-#    ngx_module_name="${ngx_module_name} ngx_stream_global_counter_var"
-#    ngx_module_srcs="${ngx_module_srcs} ${ngx_addon_dir}/src/ngx_stream_global_counter_var.c"
-#  fi
-#  . auto/module
-#fi
+if [ $STREAM = NO ]; then
+	echo "Skipping ngx_lua_select_module for ngx_stream_module"
+else
+	ngx_module_type=STREAM
+	ngx_module_name=ngx_stream_lua_select_module
+	ngx_module_srcs="${ngx_addon_dir}/src/ngx_stream_lua_select_module.c"
+	ngx_module_libs=$ngx_feature_libs
+	. auto/module
+fi

@@ -12,7 +12,7 @@ _openresty_ver=1.19.3.1
 _pagespeed_ver=1.13.35.2-stable
 _psol_ver=1.13.35.2
 
-_target_module_name=ngx_global_counter_var
+_target_module_name=ngx_lua_select
 
 pkgname=nginx-${_target_module_name}-dev-git
 
