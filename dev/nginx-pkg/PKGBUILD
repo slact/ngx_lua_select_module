@@ -402,6 +402,7 @@ build() {
       echo "./configure ${CONFIGURE[@]} --with-cc-opt=${CFLAGS} --with-ld-opt=${LDFLAGS}"
       ./configure ${CONFIGURE[@]} "--with-cc-opt=${CFLAGS}" "--with-ld-opt=${LDFLAGS}"
     else
+      echo "./configure ${CONFIGURE[@]}"
       ./configure ${CONFIGURE[@]}
     fi
     

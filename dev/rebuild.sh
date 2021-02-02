@@ -3,7 +3,10 @@ MY_PATH="`dirname \"$0\"`"
 MY_PATH="`( cd \"$MY_PATH\" && pwd )`"
 pkg_path=$MY_PATH/nginx-pkg
 _src_dir=${MY_PATH}/../src
-  
+
+export EXPLICIT_CFLAGS=1
+export WITH_LUA_MODULE=""
+export USE_OPENRESTY=1
 
 _clang="ccache clang -Qunused-arguments -fcolor-diagnostics"
 
@@ -80,16 +83,6 @@ for opt in $*; do
       export MUDFLAP=1
       export CC=gcc
       ;;
-    stable|stableversion)
-      export NGINX_STABLEVERSION=1;;
-    legacyversion|legacy)
-      export NGINX_LEGACYVERSION=1;;
-    oldversion|old)
-      export NGINX_OLDVERSION=1;;
-    veryoldversion|veryold)
-      export NGINX_VERYOLDVERSION=1;;
-    version=*)
-      export NGINX_CUSTOM_VERSION="${opt:8}";;
     release=*)
       RELEASE="${opt:8}";;
     slabpatch|slab)
@@ -114,11 +107,6 @@ for opt in $*; do
     explicit_cflags)
       export EXPLICIT_CFLAGS=1
       ;;
-    openresty)
-      export EXPLICIT_CFLAGS=1
-      export WITH_LUA_MODULE=""
-      export USE_OPENRESTY=1
-      ;;
     openssl1.0)
       export USE_OPENSSL_10=1
       ;;
@@ -127,10 +115,6 @@ for opt in $*; do
       export EXPLICIT_CFLAGS=1
       export WITH_LUA_MODULE=""
       export USE_OPENRESTY=1
-      ;;
-    lua_stream_module)
-      export WITH_LUA_STREAM_MODULE=1
-      export WITH_STREAM_MODULE=1
       ;;
     lua_module)
       export WITH_LUA_MODULE=1
@@ -211,7 +195,7 @@ _build_nginx() {
 
   rm "${srcdir}/nginx"
   ln -sf "${srcdir}/${_extracted_dir}" "${srcdir}/nginx"
-  ln -sf "${startdir}/nchan" "${srcdir}/nchan"
+  ln -sf "${startdir}/ngx_lua_select" "${srcdir}/ngx_lua_select"
   
   build
 

@@ -37,12 +37,15 @@ DEBUGGER_CMD="dbus-run-session kdbg -p %s $SRCDIR/nginx"
 #DEBUGGER_CMD="nemiver --attach=%s $SRCDIR/nginx"
 
 
-_pkgdir="${DEVDIR}/nginx-nchan/pkg/nginx-nchan-dev"
-_dynamic_module="$_pkgdir/etc/nginx/modules/ngx_nchan_module.so"
-
-_cacheconf="  proxy_cache_path _CACHEDIR_ levels=1:2 keys_zone=cache:1m; \\n  server {\\n       listen 8007;\\n       location / { \\n          proxy_cache cache; \\n      }\\n  }\\n"
+_pkgdir="${DEVDIR}/nginx-pkg/pkg/nginx-ngx_lua_select-dev-git"
+_dynamic_module="$_pkgdir/etc/nginx/modules/ngx_lua_select_module.so"
 
 NGINX_CONF_FILE="nginx.conf"
+
+_prefix="${_pkgdir}/etc/openresty"
+export LD_LIBRARY_PATH="${_prefix}/luajit/lib:${LD_LIBRARY_PATH}"
+export LUA_PATH="\${prefix}/site/lualib/?.ljbc;\${prefix}/site/lualib/?/init.ljbc;\${prefix}/lualib/?.ljbc;\${prefix}/lualib/?/init.ljbc;\${prefix}/site/lualib/?.lua;\${prefix}/site/lualib/?/init.lua;\${prefix}/lualib/?.lua;\${prefix}/lualib/?/init.lua"
+export LUA_CPATH="\${prefix}/site/lualib/?.so;\${prefix}/lualib/?.so"
 
 for opt in $*; do
   if [[ "$opt" = <-> ]]; then
@@ -118,7 +121,7 @@ done
 
 NGINX_CONFIG=`pwd`/$NGINX_CONF_FILE
 NGINX_TEMP_CONFIG=`pwd`/.nginx.thisrun.conf
-NGINX_OPT=( -p `pwd`/ 
+NGINX_OPT=( -p $_prefix
     -c $NGINX_TEMP_CONFIG
 )
 cp -fv $NGINX_CONFIG $NGINX_TEMP_CONFIG
@@ -170,7 +173,7 @@ TRAPINT() {
 }
 
 attach_debugger() {
-  master_pid=`cat /tmp/nchan-test-nginx.pid`
+  master_pid=`cat /tmp/lua-select-test-nginx.pid`
   while [[ -z $child_pids ]]; do
     child_pids=`pgrep -P $master_pid`
     sleep 0.1
@@ -204,20 +207,20 @@ attach_ddd_vgdb() {
 }
 
 if [[ $debugger == 1 ]]; then
-  ./nginx $NGINX_OPT
+  ./openresty $NGINX_OPT
   sleep 0.2
   attach_debugger "$DEBUGGER_NAME" "$DEBUGGER_CMD"
   wait $debugger_pids
   kill $master_pid
 elif [[ $debug_master == 1 ]]; then
   pushd $SRCDIR
-  kdbg -a "$NGINX_OPT" "./nginx"
+  kdbg -a "$NGINX_OPT" "./openresty"
   popd
 elif [[ $valgrind == 1 ]]; then
   mkdir ./coredump 2>/dev/null
   pushd ./coredump >/dev/null
   if [[ $ATTACH_DDD == 1 ]]; then
-    valgrind $VALGRIND_OPT ../nginx $NGINX_OPT &
+    valgrind $VALGRIND_OPT ../openresty $NGINX_OPT &
     _master_pid=$!
     echo "nginx at $_master_pid"
     sleep 4
@@ -225,13 +228,14 @@ elif [[ $valgrind == 1 ]]; then
     wait $debugger_pids
     kill $master_pid
   else
-    echo valgrind $VALGRIND_OPT ../nginx $NGINX_OPT
-    valgrind $VALGRIND_OPT ../nginx $NGINX_OPT
+    echo valgrind $VALGRIND_OPT ../openresty $NGINX_OPT
+    valgrind $VALGRIND_OPT ../openresty $NGINX_OPT
   fi
   popd >/dev/null
 elif [[ $alleyoop == 1 ]]; then
-  alleyoop ./nginx $NGINX_OPT
+  alleyoop ./openresty $NGINX_OPT
 else
-  ./nginx $NGINX_OPT &
+  echo ./openresty $NGINX_OPT
+  ./openresty $NGINX_OPT &
   wait $!
 fi
