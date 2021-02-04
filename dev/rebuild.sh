@@ -1,23 +1,29 @@
 #!/usr/bin/env zsh
-MY_PATH="`dirname \"$0\"`"
-MY_PATH="`( cd \"$MY_PATH\" && pwd )`"
-pkg_path=$MY_PATH/nginx-pkg
-_src_dir=${MY_PATH}/../src
+DEV_PATH=$(realpath "`dirname \"$0\"`")
+BASE_PATH=`realpath ${DEV_PATH}/..`
+BUILD_PATH=${DEV_PATH}/build
+BUILD_PREFIX=${DEV_PATH}/build/out
 
-export EXPLICIT_CFLAGS=1
-export WITH_LUA_MODULE=""
-export USE_OPENRESTY=1
+SRC_PATH=${BASE_PATH}/src
 
-_clang="ccache clang -Qunused-arguments -fcolor-diagnostics"
+if command -v nproc >/dev/null; then
+  _num_cores=`nproc`
+else
+  _num_cores=4
+fi
+
+OPENRESTY_VERSION=1.19.3.1
+LUAJIT_USE_APICHECK=1
+OPTIMIZE_LEVEL=0
+
+
+_clang="clang -Qunused-arguments -fcolor-diagnostics"
 
 #clang_memcheck="-fsanitize=address,undefined -fno-omit-frame-pointer"
 clang_sanitize_memory="-use-gold-plugins -fsanitize=memory -fsanitize-memory-track-origins -fno-omit-frame-pointer -fsanitize-blacklist=bl.txt"
 clang_sanitize_addres="-fsanitize=address,undefined -fno-omit-frame-pointer"
 
-optimize_level=0;
-
-export WITH_HTTP_SSL=1
-export CONFIGURE_WITH_DEBUG=0
+CONFIGURE_WITH_DEBUG=0
 _extra_config_opt=()
 
 #export WITH_LUA_MODULE=1
@@ -25,50 +31,44 @@ _extra_config_opt=()
 for opt in $*; do
   case $opt in
     clang)
-      export CC=$_clang;;
+      CC=$_clang;;
     coverage)
-      export CC="$_clang -fprofile-instr-generate -fcoverage-mapping"
+      CC="$_clang -fprofile-instr-generate -fcoverage-mapping"
       ;;
     clang-sanitize|sanitize|sanitize-memory)
-      export CC="CMAKE_LD=llvm-link $_clang -Xclang -cc1 $clang_sanitize_memory "
-      export CLINKER=$clang
+      CC="CMAKE_LD=llvm-link $_clang -Xclang -cc1 $clang_sanitize_memory "
+      CLINKER=$clang
       ;;
     gcc-sanitize-undefined)
-      export SANITIZE_UNDEFINED=1
+      SANITIZE_UNDEFINED=1
       ;;
     sanitize-address)
-      export CC="$_clang $clang_sanitize_addres";;
+      CC="$_clang $clang_sanitize_addres";;
     gcc)
-      export CC="gcc";;
+      CC="gcc";;
     gcc6)
-      export CC="ccache gcc-6";;
+      CC="gcc-6";;
     gcc5)
-      export CC="ccache gcc-5";;
+      CC="gcc-5";;
     gcc4|gcc47|gcc4.7)
-      export CC="ccache gcc-4.7";;
+      CC="gcc-4.7";;
     nopool|no-pool|nop) 
-      export NO_POOL=1;;
-    trackpool|track-pool) 
-      export TRACK_POOL=1;;
-    debug-pool|debugpool) 
-      export NGX_DEBUG_POOL=1;;
+      NO_POOL=1;;
     dynamic)
-      export DYNAMIC=1;;
-    re|remake)
-      export REMAKE="-B"
-      export CONTINUE=1;;
-    c|continue|cont)
-      export CONTINUE=1;;
+      DYNAMIC=1;;
+    re|remake|continue|c)
+      REMAKE="-B"
+      NO_CONFIGURE=1
+      NO_EXTRACT_SOURCE=1
+      ;;
     noextract)
-      export NO_EXTRACT_SOURCE=1;;
+      NO_EXTRACT_SOURCE=1;;
     nomake)
-      export NO_MAKE=1;;
+      NO_MAKE=1;;
     nodebug)
-      export NO_DEBUG=1;;
+      NO_DEBUG=1;;
     echo_module)
-      export WITH_NGX_ECHO_MODULE=1;;
-    pagespeed)
-      export WITH_NGX_PAGESPEED_MODULE=1;;
+      WITH_NGX_ECHO_MODULE=1;;
     O0)
       optimize_level=0;;
     O1)
@@ -79,153 +79,224 @@ for opt in $*; do
       optimize_level=3;;
     Og)
       optimize_level=g;;
-    mudflap)
-      export MUDFLAP=1
-      export CC=gcc
-      ;;
     release=*)
       RELEASE="${opt:8}";;
-    slabpatch|slab)
-      export NGX_SLAB_PATCH=1;;
     withdebug)
-      export CONFIGURE_WITH_DEBUG=1;;
+      CONFIGURE_WITH_DEBUG=1;;
     clang-analyzer|analyzer|scan|analyze)
-      export CC="clang"
-      export CLANG_ANALYZER=$MY_PATH/clang-analyzer
+      CC="clang"
+      CLANG_ANALYZER=$DEV_PATH/clang-analyzer
       mkdir $CLANG_ANALYZER 2>/dev/null
       ;;
-    nossl|no_ssl)
-      export WITH_HTTP_SSL=""
-      ;;
     stub_status)
-      export WITH_STUB_STATUS_MODULE=1
+      WITH_STUB_STATUS_MODULE=1
       ;;
     default_prefix)
-      export DEFAULT_PREFIX=1;;
+      DEFAULT_PREFIX=1;;
     prefix=*)
-      export CUSTOM_PREFIX="${opt:7}";;
-    explicit_cflags)
-      export EXPLICIT_CFLAGS=1
-      ;;
-    openssl1.0)
-      export USE_OPENSSL_10=1
-      ;;
+      CUSTOM_PREFIX="${opt:7}";;
     openresty=*)
-      export OPENRESTY_CUSTOM_VERSION="${opt:10}"
-      export EXPLICIT_CFLAGS=1
-      export WITH_LUA_MODULE=""
-      export USE_OPENRESTY=1
+      OPENRESTY_VERSION="${opt:10}"
       ;;
-    lua_module)
-      export WITH_LUA_MODULE=1
+    lua_no_jit)
+      LUAJIT_DISABLE_JIT=1;;
+    lua_no_apicheck|lua_no_debug)
+      LUAJIT_USE_APICHECK="";;
+    lua_internal_debug)
+      LUAJIT_USE_ASSERT=1;;
+    lua_valgrind)
+      LUAJIT_USE_VALGRIND=1;;
+    valgrind)
+      NO_POOL=1
+      LUAJIT_USE_VALGRIND=1
       ;;
-    luajit)
-      export LUAJIT_INC=/usr/include/luajit-2.1
-      export LUAJIT_LIB=/usr/lib/
-      ;;
+    clean_source)
+      CLEAN_SOURCE=1;;
+    clean)
+      CLEAN=1;;
     --*)
       _extra_config_opt+=( "$opt" )
   esac
 done
 
-export NO_WITH_DEBUG=$NO_WITH_DEBUG;
-export EXTRA_CONFIG_OPT="`echo $_extra_config_opt`"
+NO_WITH_DEBUG=$NO_WITH_DEBUG;
+EXTRA_CONFIG_OPT="`echo $_extra_config_opt`"
 
+_prepare_build() {
+  mkdir -p $BUILD_PATH 2>/dev/null
+  cd $BUILD_PATH
+  
+  if [[ $CLEAN_SOURCE == 1 ]]; then
+    rm -rf openresty-${OPENRESTY_VERSION}
+  fi
+  
+  if [[ $NO_EXTRACT_SOURCE == 1 ]]; then
+    echo "skipped extracting Openresty source, as requested"
+    return 0
+  fi
+  
+  openresty_source="https://openresty.org/download/openresty-${OPENRESTY_VERSION}.tar.gz"
+  wget --no-clobber "$openresty_source" || exit 1
+  ls -alh
+  if [[ ! -d "./openresty-${OPENRESTY_VERSION}" ]]; then
+    echo "tar -xf openresty-${OPENRESTY_VERSION}.tar.gz"
+    tar -xf openresty-${OPENRESTY_VERSION}.tar.gz
+  fi
+  
+  ln -sf "openresty-${OPENRESTY_VERSION}" "openresty"
+  ln -sf "openresty-${OPENRESTY_VERSION}/nginx" "nginx"
+  return 0
+}
 
-echo $EXTRA_CONFIG_OPT
-_build_nginx() {
-
-  if type "makepkg" > /dev/null; then
-    if [[ $CONTINUE == 1 ]] || [[ $NO_EXTRACT_SOURCE == 1 ]]; then
-      makepkg -f -e
-    else
-      makepkg -f
-    fi
+_run_configure_step() {
+  if [[ $NO_CONFIGURE == 1 ]]; then
+    echo "skipping ./configure, as requested"
     return 0
   fi
 
-  export NO_MAKEPKG=1
-  export NO_NGINX_USER=1
-  export NO_GCC_COLOR=1
-  export startdir="$(pwd)"
-  export EXPLICIT_CFLAGS=1
-
-  rm "${startdir}/pkg/" -Rf
-  srcdir="${startdir}/src"
-
-  source ./PKGBUILD
-
-  pkgdir="${startdir}/pkg/${pkgname}"
-  mkdir -p "$srcdir" "$pkgdir"
-
-  echo $_source
-  echo $_no_pool_patch_source
+  cd $BUILD_PATH/openresty
+  CFLAGS="${CFLAGS/-Werror/}" #no warning-as-error
+  CONFIGURE=()
+  LUAJIT_XCFLAGS=()
   
-  wget --no-clobber $_source
-  wget --no-clobber $_no_pool_patch_source
-  wget --no-clobber $_lua_nginx_module_url
-  wget --no-clobber $_lua_upstream_nginx_module_url
-  
-  if [[ -n $WITH_LUA_STREAM_MODULE ]]; then
-    wget --no-clobber $_lua_stream_module_src
+  if [[ $LUAJIT_DISABLE_JIT == 1 ]]; then
+    LUAJIT_XCFLAGS+=( -DLUAJIT_DISABLE_JIT )
   fi
+  if [[ $LUAJIT_USE_APICHECK == 1 ]]; then
+    LUAJIT_XCFLAGS+=( -DLUA_USE_APICHECK )
+  fi
+  if [[ $LUAJIT_USE_ASSERT == 1 ]]; then
+    LUAJIT_XCFLAGS+=( -DLUA_USE_ASSERT )
+  fi
+  if [[ $LUAJIT_USE_VALGRIND == 1 ]]; then
+    LUAJIT_XCFLAGS+=( -DLUAJIT_USE_VALGRIND )
+  fi
+  
+  CC=${CC:=cc}
+  
+  _tmp_path="/tmp"
+  _pid_path="/run"
+  _lock_path="/var/lock"
+  _access_log="/dev/stdout"
+  _error_log="errors.log"
 
-  if [[ -z $NO_EXTRACT_SOURCE ]]; then
-    pushd src
-    _nginx_src_file="${_source##*/}"
-    echo $_nginx_src_file
-    tar xf "../${_nginx_src_file}"
-    cp "../${_no_pool_patch_source##*/}" ./
-    if [[ ! -d ngx_debug_pool ]]; then
-      git clone "$_ngx_debug_pool_url"
+  if [[ -n $NO_POOL ]]; then
+    CONFIGURE+=( --with-no-pool-patch )
+  fi
+  
+  if [[ -n $EXTRA_CONFIG_OPT ]]; then
+    if [[ $0 == "/usr/bin/makepkg" ]]; then
+      CONFIGURE+=${EXTRA_CONFIG_OPT}
     else
-      pushd ngx_debug_pool
-      git pull
-      popd
-    fi
-    
-    tar xf "../v${_lua_nginx_module_ver}.tar.gz"
-    tar xf "../v${_lua_upstream_nginx_module_ver}.tar.gz"
-    
-    if [[ -n $WITH_LUA_STREAM_MODULE ]]; then
-      tar xf "../v${_lua_stream_module_ver}.tar.gz"
-    fi
-    popd
+      CONFIGURE+=( ${=EXTRA_CONFIG_OPT} )
+    fi    
   fi
 
-  rm "${srcdir}/nginx"
-  ln -sf "${srcdir}/${_extracted_dir}" "${srcdir}/nginx"
-  ln -sf "${startdir}/ngx_lua_select" "${srcdir}/ngx_lua_select"
+  if [[ -z $DEFAULT_PREFIX ]]; then
+    if [[ -n $CUSTOM_PREFIX ]]; then
+      _prefix_path=$CUSTOM_PREFIX
+    else
+      _prefix_path="/etc/$_name"
+    fi
+  else
+    _prefix_path="/usr/local/$_name"
+  fi
   
-  build
+  if [[ -z $DEFAULT_PREFIX ]]; then
+    CONFIGURE+=( --prefix=$_prefix_path )
+  fi
+  
+    CONFIGURE+=(
+    --prefix=${BUILD_PREFIX}
+    --sbin-path=${BUILD_PREFIX}/bin/nginx
+    --pid-path=${_pid_path}/nginx.pid
+    --lock-path=${_pid_path}/nginx.lock
+    --http-client-body-temp-path=${_tmp_path}/client_body_temp
+    --http-proxy-temp-path=${_tmp_path}/proxy_temp
+    --http-fastcgi-temp-path=${_tmp_path}/fastcgi_temp
+    --http-uwsgi-temp-path=${_tmp_path}/uwsgi_temp
+    --http-log-path=${_access_log}
+    --error-log-path=${_error_log}
+    -j${_num_cores}
+  )
 
-  pushd "${srcdir}/nginx"
-  ls -alh
-  make DESTDIR="$pkgdir/" install
-  popd
+  if [[ -n $WITH_STUB_STATUS_MODULE ]]; then
+    CONFIGURE+=( --with-http_stub_status_module )
+  fi
+  
+  if [[ $DYNAMIC == 1 ]]; then
+    CONFIGURE+=( --add-dynamic-module=${BASE_PATH} )
+  else
+    CONFIGURE+=( --add-module=${BASE_PATH} )
+  fi
+  
+  if [[ $CONFIGURE_WITH_DEBUG == 1 ]]; then
+    CONFIGURE+=( "--with-debug" )
+  fi
+  
+  if [[ -z $NO_NGINX_USER ]]; then
+    CONFIGURE+=( "--user=${_user}" "--group=${_group}" )
+  fi
+  
+  if [[ $SANITIZE_UNDEFINED == 1 ]]; then
+    LDFLAGS="$LDFLAGS -lubsan"
+  fi
+  
+  if [[ $CC == *clang* ]] || [[ "$OSTYPE" == "darwin"* ]]; then
+    #not a valid clang parameter
+    CFLAGS="${CFLAGS/-fvar-tracking-assignments/}"
+    CFLAGS="${CFLAGS/-fvar-tracking-assignments/}"
+    if [[ -z $CLANG_ANALYZER ]]; then
+      CFLAGS="-ferror-limit=5 $CFLAGS -Wconditional-uninitialized"
+    fi
+  elif [[ $CC == "cc" ]] || [[ $CC == "gcc" ]] || [[ -z $CC ]] && [[ -z $NO_GCC_COLOR ]]; then
+    CFLAGS="-fdiagnostics-color=always  -Wmaybe-uninitialized $CFLAGS"
+  fi
+  
+  if [[ ! -z $OPTIMIZE_LEVEL ]]; then
+    CFLAGS="-O${OPTIMIZE_LEVEL} $CFLAGS"
+  fi
+  
+  export CFLAGS=$CFLAGS
+  export CC=$CC
+  export LDFLAGS=$LDFLAGS
+  
+  if ! [[ -z $CLANG_ANALYZER ]]; then
+    scan-build -o "$CLANG_ANALYZER" ./configure "--with-cc=${CC}" "--with-cc-opt=${CFLAGS}" "--with-ld-opt=${LDFLAGS}" "--with-luajit-ldflags=${LDFLAGS}" "--with-luajit-xcflags=${LUAJIT_XCFLAGS}" ${CONFIGURE[@]}
+  else
+    if command -v ccache >/dev/null && [[ ! $CC == ccache* ]]; then
+      CC="ccache ${CC}"
+    fi
+    pwd;
+    echo ./configure --with-cc="${CC}" "--with-cc-opt=${CFLAGS}" "--with-ld-opt=${LDFLAGS}" "--with-luajit-ldflags=${LDFLAGS}" "--with-luajit-xcflags=${LUAJIT_XCFLAGS}" ${CONFIGURE[@]}
+    ./configure "--with-cc=${CC}" "--with-cc-opt=${CFLAGS}" "--with-ld-opt=${LDFLAGS}" "--with-luajit-ldflags=${LDFLAGS}" "--with-luajit-xcflags=${LUAJIT_XCFLAGS}" ${CONFIGURE[@]}
+  fi
+  
+  return $?
 }
 
+_run_build_step() {
+  cd ${BUILD_PATH}/openresty
+  if ! [[ -z $CLANG_ANALYZER ]]; then
+    CFLAGS=$CFLAGS scan-build -o "$CLANG_ANALYZER" make -j${_num_cores}
+  else
+    make $REMAKE -j${_num_cores}
+  fi
+  return $?
+}
 
-export OPTIMIZE_LEVEL=$optimize_level
+_run_install_step() {
+  if ! [[ -z $CLANG_ANALYZER ]]; then
+    cd $CLANG_ANALYZER >/dev/null
+    latest_scan=`ls -c |head -n1`
+    echo "run 'scan-view ${CLANG_ANALYZER}/${latest_scan}' for static analysis."
+    scan-view $latest_scan 2>/dev/null
+  else
+    echo make install -j${_num_cores} 
+    cd ${BUILD_PATH}/openresty
+    make install -j${_num_cores} >/dev/null
+  fi
+  return $?
+}
 
-if [[ -z $NO_MAKE ]]; then
-  
-  pushd $pkg_path >/dev/null
-  
-  _build_nginx
-  ln -sf "${pkg_path}"/pkg/*/usr/bin/nginx "${MY_PATH}/nginx" > /dev/null
-  ln -sf "${MY_PATH}/nginx" "${_src_dir}/nginx" > /dev/null
-  rm "${_src_dir}/nginx-source" >/dev/null
-  ln -sf "${pkg_path}/src/nginx/src" "${_src_dir}/nginx-source" > /dev/null
-  
-  popd >/dev/null
-fi
-if ! [[ -z $CLANG_ANALYZER ]]; then
-  pushd $CLANG_ANALYZER >/dev/null
-  latest_scan=`ls -c |head -n1`
-  echo "run 'scan-view ${CLANG_ANALYZER}/${latest_scan}' for static analysis."
-  scan-view $latest_scan 2>/dev/null
-  popd >/dev/null
-fi
-
-
+_prepare_build && _run_configure_step && _run_build_step && _run_install_step

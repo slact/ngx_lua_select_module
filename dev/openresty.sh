@@ -42,11 +42,6 @@ _dynamic_module="$_pkgdir/etc/nginx/modules/ngx_lua_select_module.so"
 
 NGINX_CONF_FILE="nginx.conf"
 
-_prefix="${_pkgdir}/etc/openresty"
-export LD_LIBRARY_PATH="${_prefix}/luajit/lib:${LD_LIBRARY_PATH}"
-export LUA_PATH="\${prefix}/site/lualib/?.ljbc;\${prefix}/site/lualib/?/init.ljbc;\${prefix}/lualib/?.ljbc;\${prefix}/lualib/?/init.ljbc;\${prefix}/site/lualib/?.lua;\${prefix}/site/lualib/?/init.lua;\${prefix}/lualib/?.lua;\${prefix}/lualib/?/init.lua"
-export LUA_CPATH="\${prefix}/site/lualib/?.so;\${prefix}/lualib/?.so"
-
 for opt in $*; do
   if [[ "$opt" = <-> ]]; then
     WORKERS=$opt
@@ -121,7 +116,7 @@ done
 
 NGINX_CONFIG=`pwd`/$NGINX_CONF_FILE
 NGINX_TEMP_CONFIG=`pwd`/.nginx.thisrun.conf
-NGINX_OPT=( -p $_prefix
+NGINX_OPT=(
     -c $NGINX_TEMP_CONFIG
 )
 cp -fv $NGINX_CONFIG $NGINX_TEMP_CONFIG
@@ -207,20 +202,20 @@ attach_ddd_vgdb() {
 }
 
 if [[ $debugger == 1 ]]; then
-  ./openresty $NGINX_OPT
+  ./nginx $NGINX_OPT
   sleep 0.2
   attach_debugger "$DEBUGGER_NAME" "$DEBUGGER_CMD"
   wait $debugger_pids
   kill $master_pid
 elif [[ $debug_master == 1 ]]; then
   pushd $SRCDIR
-  kdbg -a "$NGINX_OPT" "./openresty"
+  kdbg -a "$NGINX_OPT" "./nginx"
   popd
 elif [[ $valgrind == 1 ]]; then
   mkdir ./coredump 2>/dev/null
   pushd ./coredump >/dev/null
   if [[ $ATTACH_DDD == 1 ]]; then
-    valgrind $VALGRIND_OPT ../openresty $NGINX_OPT &
+    valgrind $VALGRIND_OPT ../nginx $NGINX_OPT &
     _master_pid=$!
     echo "nginx at $_master_pid"
     sleep 4
@@ -228,14 +223,14 @@ elif [[ $valgrind == 1 ]]; then
     wait $debugger_pids
     kill $master_pid
   else
-    echo valgrind $VALGRIND_OPT ../openresty $NGINX_OPT
-    valgrind $VALGRIND_OPT ../openresty $NGINX_OPT
+    echo valgrind $VALGRIND_OPT ../nginx $NGINX_OPT
+    valgrind $VALGRIND_OPT ../nginx $NGINX_OPT
   fi
   popd >/dev/null
 elif [[ $alleyoop == 1 ]]; then
-  alleyoop ./openresty $NGINX_OPT
+  alleyoop ./nginx $NGINX_OPT
 else
-  echo ./openresty $NGINX_OPT
-  ./openresty $NGINX_OPT &
+  echo ./nginx $NGINX_OPT
+  ./nginx $NGINX_OPT &
   wait $!
 fi
