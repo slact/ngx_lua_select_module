@@ -1,11 +1,13 @@
 ngx_addon_name=ngx_lua_select_module
-
 ngx_module_deps="${ngx_addon_dir}/src/ngx_lua_select.h"
-ngx_module_incs="${ngx_addon_dir}/src"
-. auto/have
 
-echo `pwd`
-echo $ngx_addon_dir
+# openresty doen't export the headers we need.
+# it's ok though, we'll import them ourselves through our shady import-export partnerships
+_ngx_http_lua_module_src=../ngx_lua-*/src
+_ngx_stream_lua_module_src=../ngx_stream_lua-*/src
+ngx_module_incs="${ngx_addon_dir}/src ${_ngx_http_lua_module_src} ${_ngx_stream_lua_module_src}"
+
+. auto/have
 
 ngx_module_type=HTTP
 ngx_module_name=ngx_http_lua_select_module

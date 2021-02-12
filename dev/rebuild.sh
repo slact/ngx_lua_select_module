@@ -23,6 +23,7 @@ _clang="clang -Qunused-arguments -fcolor-diagnostics"
 clang_sanitize_memory="-use-gold-plugins -fsanitize=memory -fsanitize-memory-track-origins -fno-omit-frame-pointer -fsanitize-blacklist=bl.txt"
 clang_sanitize_addres="-fsanitize=address,undefined -fno-omit-frame-pointer"
 
+
 CONFIGURE_WITH_DEBUG=0
 _extra_config_opt=()
 
@@ -62,6 +63,8 @@ for opt in $*; do
       NO_EXTRACT_SOURCE=1
       ;;
     noextract)
+      NO_EXTRACT_SOURCE=1;;
+    noconfigure)
       NO_EXTRACT_SOURCE=1;;
     nomake)
       NO_MAKE=1;;
@@ -137,7 +140,6 @@ _prepare_build() {
   
   openresty_source="https://openresty.org/download/openresty-${OPENRESTY_VERSION}.tar.gz"
   wget --no-clobber "$openresty_source" || exit 1
-  ls -alh
   if [[ ! -d "./openresty-${OPENRESTY_VERSION}" ]]; then
     echo "tar -xf openresty-${OPENRESTY_VERSION}.tar.gz"
     tar -xf openresty-${OPENRESTY_VERSION}.tar.gz
@@ -153,7 +155,18 @@ _run_configure_step() {
     echo "skipping ./configure, as requested"
     return 0
   fi
+  
+  if [[ -z $NO_DEBUG ]]; then
+    #debug build. clear cflags
+    CFLAGS=" -ggdb -fvar-tracking-assignments -O$OPTIMIZE_LEVEL"
+  fi
 
+  CFLAGS="$CFLAGS -Wno-error -Wall -Wextra -Wno-unused-parameter -Wpointer-sign -Wpointer-arith -Wshadow -Wnested-externs -Wsign-compare"
+  if [[ $SANITIZE_UNDEFINED == 1 ]]; then
+      CFLAGS="$CFLAGS -fsanitize=undefined -fsanitize=shift -fsanitize=integer-divide-by-zero -fsanitize=unreachable -fsanitize=vla-bound -fsanitize=null -fsanitize=return -fsanitize=bounds -fsanitize=alignment -fsanitize=object-size -fsanitize=float-divide-by-zero -fsanitize=float-cast-overflow -fsanitize=nonnull-attribute -fsanitize=returns-nonnull-attribute -fsanitize=enum -lubsan"
+  fi
+  
+  
   cd $BUILD_PATH/openresty
   CFLAGS="${CFLAGS/-Werror/}" #no warning-as-error
   CONFIGURE=()
