@@ -221,7 +221,18 @@ static int select_fail_cleanup(lua_State *L, ngx_lua_select_ctx_t *ctx, char *ms
     ctx->ref = LUA_NOREF;
   }
   for(int i = 0; i<selected_so_far; i++) {
-    ngx_connection_t *c = ctx->socket[i].stream.up->peer.connection;
+    ngx_connection_t *c;
+    ngx_lua_select_socket_t *s = &ctx->socket[i];
+    switch(s->type) {
+      case NGX_LUA_SELECT_TCP_UPSTREAM:
+      case NGX_LUA_SELECT_TCP_DOWNSTREAM:
+        c = s->stream.tcp.up->peer.connection;
+        break;
+      case NGX_LUA_SELECT_UDP_UPSTREAM:
+      case NGX_LUA_SELECT_UDP_DOWNSTREAM:
+        c = s->stream.udp.up->udp_connection.connection;
+        break;
+    }
     if(c->read->active) {
       //this may be going too far. could break future reads or something.
       //however it looks like all the other openresty API functions that use these events
@@ -274,12 +285,13 @@ static int lua_select_module_select_read(lua_State *L) {
   ctx->stream.prev_request_read_handler = NULL;
   
   for(i=0; i<n; i++) {
+    //TODO: detect if this is a TCP or UDP socket.
+    //for now just assume it's TCP
     ngx_stream_lua_socket_tcp_upstream_t        *u;
     luaL_checktype(L, i+1, LUA_TTABLE);
     lua_rawgeti(L, i+1, SOCKET_CTX_INDEX);
     u = lua_touserdata(L, -1);
     lua_pop(L, 1);
-    
     
     if (u == NULL || u->peer.connection == NULL || u->read_closed) {
       return select_error_cleanup(L, ctx, "closed", i);
@@ -306,13 +318,14 @@ static int lua_select_module_select_read(lua_State *L) {
     }
     */
     
-    ctx->socket[i].stream.up = u;
+    ctx->socket[i].stream.tcp.up = u;
     
     //store the socket lua ref 'cause I don't know where openresty keeps it, nor do I want to rely on whatever that place is remaining the same throughout time
     lua_pushvalue(L, i+1);
     ctx->socket[i].lua_socket_ref = luaL_ref(L, LUA_REGISTRYINDEX); //yeah luaL_ref pops that value for ya
     
     ngx_connection_t *c = u->peer.connection;
+    ctx->socket[i].connection = c;
     
     if(c == r->connection) {
       //this is the originating request's connection
@@ -322,10 +335,12 @@ static int lua_select_module_select_read(lua_State *L) {
       ctx->stream.prev_request_read_handler = r->read_event_handler;
       r->read_event_handler = ngx_stream_lua_select_socket_read_request_handler;
       ctx->socket[i].stream.prev_upstream_read_handler = NULL;
+      ctx->socket[i].type = NGX_LUA_SELECT_TCP_DOWNSTREAM;
     }
     else {
       ctx->socket[i].stream.prev_upstream_read_handler = u->read_event_handler;
       u->read_event_handler = ngx_stream_lua_select_socket_read_upstream_handler;
+      ctx->socket[i].type = NGX_LUA_SELECT_TCP_UPSTREAM;
     }
     
     //TODO: should this be ngx_add_event or ngx_handle_read_event?...
@@ -416,7 +431,7 @@ static ngx_int_t ngx_stream_lua_select_resume(ngx_stream_lua_request_t *r) {
   int ready_count = 0;
   lua_createtable(coroL, ctx->count, 0);
   for(unsigned i=0; i<ctx->count; i++) {
-    ngx_connection_t *c = ctx->socket[i].stream.up->peer.connection;
+    ngx_connection_t *c = ctx->socket[i].connection;
     ngx_event_t      *rev = c->read;
     int               sockref = ctx->socket[i].lua_socket_ref;
     if(rev->ready) {
@@ -471,25 +486,32 @@ static void ngx_stream_lua_select_ctx_cleanup_and_discard(ngx_stream_lua_request
   lua_State                       *L = ngx_stream_lua_get_lua_vm(r, streamctx);
   
   for(unsigned i=0; i<ctx->count; i++) {
-    if(ctx->socket[i].stream.prev_upstream_read_handler) {
-      //restore upstream read event handler
-      ctx->socket[i].stream.up->read_event_handler = ctx->socket[i].stream.prev_upstream_read_handler;
+    switch(ctx->socket[i].type) {
+      case NGX_LUA_SELECT_TCP_UPSTREAM:
+        assert(ctx->socket[i].stream.prev_upstream_read_handler);
+        //restore upstream read event handler
+        ctx->socket[i].stream.tcp.up->read_event_handler = ctx->socket[i].stream.prev_upstream_read_handler;
+        break;
+      
+      case NGX_LUA_SELECT_TCP_DOWNSTREAM:
+        //restore request handler if needed
+        assert(ctx->stream.prev_request_read_handler);
+        r->read_event_handler = ctx->stream.prev_request_read_handler;
+        break;
+      
+      case NGX_LUA_SELECT_UDP_UPSTREAM:
+      case NGX_LUA_SELECT_UDP_DOWNSTREAM:
+        //NOT IMPLEMENTED
+        raise(SIGABRT);
+        break;
     }
-    else {
-      //this was the main request. it gets restored shortly afterwards.
-      assert(ctx->stream.prev_request_read_handler != NULL);
-    }
-    
-    /*if(c->read->active) {
+    /*
+    if(c->read->active) {
       ngx_del_event(c->read, NGX_READ_EVENT, 0);
-    }*/
+    }
+    */
     
     luaL_unref(L, LUA_REGISTRYINDEX, ctx->socket[i].lua_socket_ref);
-  }
-  
-  //restore request handler if needed
-  if(ctx->stream.prev_request_read_handler) {
-    r->read_event_handler = ctx->stream.prev_request_read_handler;
   }
   
   luaL_unref(L, LUA_REGISTRYINDEX, ctx->ref);

@@ -18,6 +18,12 @@ extern ngx_module_t ngx_http_lua_select_module;
 extern ngx_module_t ngx_stream_lua_select_module;
 #endif
 
+typedef enum {
+  NGX_LUA_SELECT_TCP_UPSTREAM,
+  NGX_LUA_SELECT_TCP_DOWNSTREAM,
+  NGX_LUA_SELECT_UDP_UPSTREAM,
+  NGX_LUA_SELECT_UDP_DOWNSTREAM,
+} ngx_lua_select_socktype_t;
 
 //copypasta from openresty
 enum {
@@ -38,11 +44,20 @@ typedef struct {
   #endif
   #ifdef NGX_STREAM_MODULE
     struct {
-      ngx_stream_lua_socket_tcp_upstream_t          *up;
+      union {
+        struct {
+          ngx_stream_lua_socket_tcp_upstream_t          *up;
+        } tcp;
+        struct {
+          ngx_stream_lua_socket_udp_upstream_t          *up;
+        } udp;
+      };
       ngx_stream_lua_socket_tcp_upstream_handler_pt  prev_upstream_read_handler;
     } stream;
   #endif
   };
+  ngx_connection_t                      *connection;
+  ngx_lua_select_socktype_t              type;
   int                                    lua_socket_ref;
 } ngx_lua_select_socket_t;
 
