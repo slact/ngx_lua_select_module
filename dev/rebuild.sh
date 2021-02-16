@@ -140,6 +140,7 @@ _prepare_build() {
   
   openresty_source="https://openresty.org/download/openresty-${OPENRESTY_VERSION}.tar.gz"
   wget --no-clobber "$openresty_source" || exit 1
+
   if [[ ! -d "./openresty-${OPENRESTY_VERSION}" ]]; then
     echo "tar -xf openresty-${OPENRESTY_VERSION}.tar.gz"
     tar -xf openresty-${OPENRESTY_VERSION}.tar.gz
@@ -299,6 +300,8 @@ _run_build_step() {
 }
 
 _run_install_step() {
+  ln -sf "${BUILD_PATH}"/openresty/bundle/nginx-1* "${DEV_PATH}/src"
+
   if ! [[ -z $CLANG_ANALYZER ]]; then
     cd $CLANG_ANALYZER >/dev/null
     latest_scan=`ls -c |head -n1`
