@@ -10,7 +10,7 @@ local select = require "ngx.select"
 
 Waits until at least one socket is ready for reading or writing, or timeout is reached.
 
-First argument is a table of cosockets from `ngx.req.socket()` or `ngx.socket.tcp()` or `ngx.socket.udp()`.
+**First argument** is a table of cosockets from `ngx.req.socket()` or `ngx.socket.tcp()` or `ngx.socket.udp()`.
 
 ```lua
 select({[sock1]="r", [sock2]="w", [sock3]="rw"})
@@ -22,14 +22,16 @@ select({sock1, sock2, sock3})
 --wait until sock1 OR sock2 OR sock3 are read-ready. equivalent to
 select({[sock1]="r", [sock2]="r", [sock3]="r"})
 ```
+`select()` will error out if any of the sockets passed in are closed or aren't sockets.
 
-Second argument is an optional wait timeout, in milliseconds.
+
+**Second argument** is an optional wait timeout, in milliseconds.
 
 ```lua
 select({socket1, socket2}, 1000)
 ```
 
-Returns a table of ready sockets, or `nil, error_string` on error (such as `"timeout"`)
+**Returns** a table of ready sockets, or `nil, error_string` on error (such as `"timeout"`)
 
 Ready sockets table has numerically indexed sockets, and socket-indexed event-types:
 

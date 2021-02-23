@@ -3,14 +3,17 @@ local mm = require "mm"
 local clientsock = assert(ngx.req.socket(true))
 local upsock = ngx.socket.tcp()
 assert(upsock:connect("127.0.0.1", 8092))
+
+
 upsock:settimeouts(100, 30, 1)
 clientsock:settimeouts(100, 30, 1)
+
 --mm({udp=udpsock, clientsock=clientsock, upsock=upsock, ngx_socket=ngx.socket})
 upsock:send("say hello please\n")
 upsock:receive()
 upsock:send("thanks!\n")
 while true do
-  local socks, err = select.select_read({[clientsock]="r", [upsock]="r"}, 5000)
+  local socks, err = select({[clientsock]="r", [upsock]="r"}, 5000)
   if socks == nil then
     ngx.log(ngx.NOTICE, "got select() error:" .. tostring(err))
     break

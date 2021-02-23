@@ -250,7 +250,7 @@ static void select_fail_cleanup(lua_State *L, ngx_lua_select_ctx_t *ctx, int sel
   }
 }
 
-static int lua_select_module_select_read(lua_State *L) {
+static int lua_select_module_select(lua_State *L) {
   ngx_stream_lua_request_t            *r;
   
   ngx_stream_lua_ctx_t                *streamctx;
@@ -669,12 +669,8 @@ static void ngx_stream_lua_select_ctx_cleanup_and_discard(ngx_stream_lua_request
 
 static int ngx_stream_lua_select_init_code(lua_State * L) {
   
-  lua_createtable(L, 0, 2);
-  lua_pushcfunction(L, lua_select_module_sigstop);
-  lua_setfield(L, -2, "sigstop");
-
-  lua_pushcfunction(L, lua_select_module_select_read);
-  lua_setfield(L, -2, "select_read");
+  lua_pushcfunction(L, lua_select_module_select);
+  
   return 1;
 }
 
