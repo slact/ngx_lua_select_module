@@ -55,57 +55,60 @@ ready = {
  
 ### Example
 ```nginx
-# a simple 2-way echo server with very little error handling
+#nginx.conf:
 
+# a simple 2-way echo server with very little error handling
 stream {
   server {
     listen 8083;
-    content_by_lua_block {
-      local select = require "ngx.select"
-      local clientsock = assert(ngx.req.socket(true))
-      local upsock = ngx.socket.tcp()
-      assert(upsock:connect("127.0.0.1", 8092))
-      
-      --setting read timeouts to 1 to ensure we do not yield for more than 1ms
-      --on socket:receive() after select()
-      upsock:settimeouts(100, 30, 1)
-      clientsock:settimeouts(100, 30, 1)
-
-      while true do
-        --select clientsock and upsock for read-readiness, but wait no more than 5000 milliseconds
-        local socks, err = select({clientsock, upsock}, 5000)
-        
-        if socks == nil then
-          ngx.log(ngx.NOTICE, "got select() error:" .. tostring(err))
-          break
-        end
-        
-        local receive_error
-        for _, sock in ipairs(socks) do
-          --note that ipairs() is used here and not pairs().
-          --read the return value documentation to understand why
-          
-          local data, err = sock:receive()
-          if not data then
-            ngx.log(ngx.NOTICE, "got receive error:" .. tostring(err))
-            receive_error = true
-            break
-          end
-          sock:send("you said: " .. data.."\n")
-          data, err = sock:receive()
-          ngx.log(ngx.NOTICE, "extra receive:" .. tostring(data).. ", " .. tostring(err))
-        end
-        
-        if receive_error then
-          ngx.log(ngx.NOTICE, "a socket failed to receive data. we're done here")
-          break
-        end
-      end
-    
-    }
+    content_by_lua_file "2_way_echo_server.lua";
   }
 }
+```
 
+```lua
+--2_way_echo_server.lua:
+
+local select = require "ngx.select"
+local clientsock = assert(ngx.req.socket(true))
+local upsock = ngx.socket.tcp()
+assert(upsock:connect("127.0.0.1", 8092))
+
+--setting read timeouts to 1 to ensure we do not yield for more than 1ms
+--on socket:receive() after select()
+upsock:settimeouts(100, 30, 1)
+clientsock:settimeouts(100, 30, 1)
+
+while true do
+  --select clientsock and upsock for read-readiness, but wait no more than 5000 milliseconds
+  local socks, err = select({clientsock, upsock}, 5000)
+  
+  if socks == nil then
+    ngx.log(ngx.NOTICE, "got select() error:" .. tostring(err))
+    break
+  end
+  
+  local receive_error
+  for _, sock in ipairs(socks) do
+    --note that ipairs() is used here and not pairs().
+    --read the return value documentation to understand why
+    
+    local data, err = sock:receive()
+    if not data then
+      ngx.log(ngx.NOTICE, "got receive error:" .. tostring(err))
+      receive_error = true
+      break
+    end
+    sock:send("you said: " .. data.."\n")
+    data, err = sock:receive()
+    ngx.log(ngx.NOTICE, "extra receive:" .. tostring(data).. ", " .. tostring(err))
+  end
+  
+  if receive_error then
+    ngx.log(ngx.NOTICE, "a socket failed to receive data. we're done here")
+    break
+  end
+end
 ```
 
 ### Building and Installing
