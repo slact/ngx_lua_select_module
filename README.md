@@ -35,7 +35,7 @@ select({socket1, socket2}, 1000)
 
 Ready sockets table has numerically indexed sockets, and socket-indexed event-types:
 
-```
+```lua
 local ready, err = select({[sock1]="rw", [sock2]="rw"})
 --let's say sock1 is read-ready, and sock2 is write-ready
 
