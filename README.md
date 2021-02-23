@@ -110,7 +110,7 @@ stream {
 
 ### Building and Installing
 
-To build this module, follow the standard nginx module procedure, but pass the module argument to Openresty's `configure` script instead:
+To build this module, follow the standard Nginx module building procedure, but pass the module argument to Openresty's `configure` script instead:
 
 
 ```bash
