@@ -18,6 +18,9 @@ extern ngx_module_t ngx_http_lua_select_module;
 extern ngx_module_t ngx_stream_lua_select_module;
 #endif
 
+#define NGX_LUA_SELECT_READ 1
+#define NGX_LUA_SELECT_WRITE 2
+
 typedef enum {
   NGX_LUA_SELECT_TCP_UPSTREAM,
   NGX_LUA_SELECT_TCP_DOWNSTREAM,
@@ -53,12 +56,14 @@ typedef struct {
         } udp;
       };
       ngx_stream_lua_socket_tcp_upstream_handler_pt  prev_upstream_read_handler;
+      ngx_stream_lua_socket_tcp_upstream_handler_pt  prev_upstream_write_handler;
     } stream;
   #endif
   };
   ngx_connection_t                      *connection;
   ngx_lua_select_socktype_t              type;
   int                                    lua_socket_ref;
+  unsigned                               readwrite:2;
 } ngx_lua_select_socket_t;
 
 typedef struct {
@@ -73,6 +78,7 @@ typedef struct {
       ngx_stream_lua_request_t *r;
       ngx_stream_lua_co_ctx_t  *coctx;
       ngx_stream_lua_event_handler_pt prev_request_read_handler;
+      ngx_stream_lua_event_handler_pt prev_request_write_handler;
     } stream;
   #endif
   };

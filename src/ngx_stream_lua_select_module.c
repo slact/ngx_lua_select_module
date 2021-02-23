@@ -6,11 +6,13 @@
 static void ngx_stream_lua_select_cleanup(void *data);
 static void ngx_stream_lua_select_post_completion_handler(ngx_event_t *ev);
 static void ngx_stream_lua_select_socket_read_request_handler(ngx_stream_lua_request_t *r);
+static void ngx_stream_lua_select_socket_write_request_handler(ngx_stream_lua_request_t *r);
 static void ngx_stream_lua_select_socket_read_upstream_handler(ngx_stream_lua_request_t *r, ngx_stream_lua_socket_tcp_upstream_t *up);
+static void ngx_stream_lua_select_socket_write_upstream_handler(ngx_stream_lua_request_t *r, ngx_stream_lua_socket_tcp_upstream_t *up);
 static ngx_int_t ngx_stream_lua_select_resume(ngx_stream_lua_request_t *r);
 static void ngx_stream_lua_select_ctx_cleanup_and_discard(ngx_stream_lua_request_t *r);
 
-/*
+
 static char *luaS_dbgval(lua_State *L, int n) {
   static char buf[512];
   int         type = lua_type(L, n);
@@ -208,14 +210,13 @@ static void luaS_printstack_named(lua_State *L, const char *name) {
   lua_pop(L, 1);
   assert(lua_gettop(L) == top);
 }
-*/
 
 static int lua_select_module_sigstop(lua_State *L) {
   raise(SIGSTOP);
   return 1;
 }
 
-static int select_fail_cleanup(lua_State *L, ngx_lua_select_ctx_t *ctx, char *msg, int selected_so_far) {
+static void select_fail_cleanup(lua_State *L, ngx_lua_select_ctx_t *ctx, int selected_so_far) {
   if(ctx && ctx->ref != LUA_NOREF) {
     luaL_unref(L, LUA_REGISTRYINDEX, ctx->ref);
     ctx->ref = LUA_NOREF;
@@ -233,21 +234,19 @@ static int select_fail_cleanup(lua_State *L, ngx_lua_select_ctx_t *ctx, char *ms
         c = s->stream.udp.up->udp_connection.connection;
         break;
     }
-    if(c->read->active) {
+    if((s->readwrite & NGX_LUA_SELECT_READ) && c->read->active) {
       //this may be going too far. could break future reads or something.
       //however it looks like all the other openresty API functions that use these events
       //call ngx_add_event as needed and never assume they're already added
       ngx_del_event(c->read, NGX_READ_EVENT, 0);
     }
+    if((s->readwrite & NGX_LUA_SELECT_WRITE) && c->write->active) {
+      //this may be going too far. could break future reads or something.
+      //however it looks like all the other openresty API functions that use these events
+      //call ngx_add_event as needed and never assume they're already added
+      ngx_del_event(c->write, NGX_WRITE_EVENT, 0);
+    }
   }
-  lua_pushnil(L);
-  lua_pushstring(L, msg);
-  return 2;
-}
-
-static int select_error_cleanup(lua_State *L, ngx_lua_select_ctx_t *ctx, char *msg, int selected_so_far) {
-  lua_pop(L, select_fail_cleanup(L, ctx, msg, selected_so_far));
-  return luaL_error(L, msg);
 }
 
 static int lua_select_module_select_read(lua_State *L) {
@@ -257,9 +256,28 @@ static int lua_select_module_select_read(lua_State *L) {
   ngx_stream_lua_co_ctx_t             *coctx;
   
   ngx_lua_select_ctx_t                *ctx = NULL;
-  int n = lua_gettop(L);
+  int                                  n = lua_gettop(L);
+  
   if(n == 0) {
-    return luaL_error(L, "expecting more than 0 arguments");
+    return luaL_error(L, "expected more than 0 arguments");
+  }
+  if(n > 2) {
+    return luaL_error(L, "expected no more than 3 arguments");
+  }
+  if(!lua_istable(L, 1)) {
+    return luaL_argerror(L, 1, "expected a table of sockets");
+  }
+  if(n == 2 && !lua_isnumber(L, 2) && !lua_isnil(L, 2)) {
+    return luaL_argerror(L, 2, "expected a timeout value or nil");
+  }
+  
+  lua_Number                          timeout = 0;
+  
+  if(n >= 2 && lua_isnumber(L, 2)) {
+    timeout = lua_tonumber(L, n);
+    if(timeout < 0) {
+      return luaL_argerror(L, 2, "timeout cannot be <0");
+    }
   }
   
   if((r = ngx_stream_lua_get_req(L)) == NULL) {
@@ -271,57 +289,100 @@ static int lua_select_module_select_read(lua_State *L) {
   if ((coctx = streamctx->cur_co_ctx) == NULL) {
       return luaL_error(L, "no co ctx found");
   }
+  int socketcount = 0; 
+  lua_pushnil(L);  /* first key */
+  while(lua_next(L, 1) != 0) {
+    socketcount ++;
+    lua_pop(L, 1);
+  }
   
   
-  ctx = lua_newuserdata(L, sizeof(*ctx) + sizeof(*ctx->socket) * n);
+  ctx = lua_newuserdata(L, sizeof(*ctx) + sizeof(*ctx->socket) * socketcount);
   if(ctx == NULL) {
     return luaL_error(L, "unable to allocate ctx");
   }
-  ctx->count = n;
+  ctx->count = socketcount;
   ctx->ref = luaL_ref(L, LUA_REGISTRYINDEX);
   
-  int i;
-  
+  ctx->stream.prev_request_write_handler = NULL;
   ctx->stream.prev_request_read_handler = NULL;
   
-  for(i=0; i<n; i++) {
+  lua_pushnil(L);
+  for(int i=0; lua_next(L, 1) != 0; i++) {
     //TODO: detect if this is a TCP or UDP socket.
     //for now just assume it's TCP
-    ngx_stream_lua_socket_tcp_upstream_t        *u;
-    luaL_checktype(L, i+1, LUA_TTABLE);
-    lua_rawgeti(L, i+1, SOCKET_CTX_INDEX);
-    u = lua_touserdata(L, -1);
-    lua_pop(L, 1);
     
-    if (u == NULL || u->peer.connection == NULL || u->read_closed) {
-      return select_error_cleanup(L, ctx, "closed", i);
+    int readwrite = 0;
+    
+    ngx_stream_lua_socket_tcp_upstream_t        *u;
+    if(lua_isnumber(L, -2)) { //numeric key, assume it's strictly for reading
+      // { socket }
+      if(!lua_istable(L, -1)) {
+        select_fail_cleanup(L, ctx, i);
+        return luaL_argerror(L, 1, "expected to have a table of sockets, but there's... something else there. something... wrong");
+      }
+      lua_rawgeti(L, -1, SOCKET_CTX_INDEX);
+      u = lua_touserdata(L, -1);
+      lua_pop(L, 1);
+      readwrite = NGX_LUA_SELECT_READ;
+    }
+    else if(lua_isstring(L, -1) && lua_istable(L, -2)) {
+      //{ [socket] = "rw" }
+      const char *rw_string = lua_tostring(L, -1);
+      if(strchr(rw_string, 'r')) {
+        readwrite |= NGX_LUA_SELECT_READ;
+      }
+      if(strchr(rw_string, 'w')) {
+        readwrite |= NGX_LUA_SELECT_WRITE;
+      }
+      if(readwrite == 0) {
+        select_fail_cleanup(L, ctx, i);
+        return luaL_argerror(L, 1, "invalid read-write string in socket table, must be one of 'r', 'w', or 'rw'");
+      }
+      lua_rawgeti(L, -2, SOCKET_CTX_INDEX);
+      u = lua_touserdata(L, -1);
+      lua_pop(L, 2); //pop the readwrite string
+      lua_pushvalue(L, -1); //push the socket tabke for the luaL_ref further down
+    }
+    else {
+      select_fail_cleanup(L, ctx, i);
+      return luaL_argerror(L, 1, "invalid entry in socket table");
+    }
+    if(u == NULL) {
+      select_fail_cleanup(L, ctx, i);
+      return luaL_argerror(L, 1, "expected to have a table of sockets, but there's something amiss in that table");
+    }
+    
+    if (u->peer.connection == NULL || u->read_closed) {
+      select_fail_cleanup(L, ctx, i);
+      return luaL_argerror(L, 1, "expected to have a table of active sockets, but at least one of them is closed");
     }
     
     if (u->request != r) {
-      return select_error_cleanup(L, ctx, "bad request of socket", i);
+      select_fail_cleanup(L, ctx, i);
+      return luaL_argerror(L, 1, "expected to have a table of valid sockets, but at least one has a bad 'request'");
     }
     
     if(u->conn_waiting) {
-      return select_error_cleanup(L, ctx, "socket busy connecting", i);
+      select_fail_cleanup(L, ctx, i);
+      return luaL_argerror(L, 1, "expected to have a table of active sockets, but at least one is busy connective");
     }
     
-    //TODO: ONLY FOR SELECT() for read
-    if(u->read_waiting) {
-      return select_error_cleanup(L, ctx, "socket busy waiting for read event", i);
+    if((readwrite & NGX_LUA_SELECT_READ) && u->read_waiting) {
+      select_fail_cleanup(L, ctx, i);
+      return luaL_argerror(L, 1, "expected to have a table of active sockets, but at least one is busy waiting for read event");
     }
     
-    /*
-    //TODO: ONLY FOR SELECT() for write
-    if(  (u->write_waiting)
-      || (u->raw_downstream && (r->connection->buffered))) {
-      return select_fail_cleanup(L, ctx. "socket busy waiting for read event", i);
+    if((readwrite & NGX_LUA_SELECT_WRITE) &&
+      (u->write_waiting || (u->raw_downstream && (r->connection->buffered)))) {
+      select_fail_cleanup(L, ctx, i);
+      return luaL_argerror(L, 1, "expected to have a table of active sockets, but at least one is busy waiting for write event");
     }
-    */
     
+    ctx->socket[i].readwrite = readwrite;
     ctx->socket[i].stream.tcp.up = u;
     
     //store the socket lua ref 'cause I don't know where openresty keeps it, nor do I want to rely on whatever that place is remaining the same throughout time
-    lua_pushvalue(L, i+1);
     ctx->socket[i].lua_socket_ref = luaL_ref(L, LUA_REGISTRYINDEX); //yeah luaL_ref pops that value for ya
     
     ngx_connection_t *c = u->peer.connection;
@@ -332,23 +393,54 @@ static int lua_select_module_select_read(lua_State *L) {
       //it's handled differently than "upstreams" created with ngx.socket.tcp()
       //fuckin' openresty.. creating an ngx.req.socket() wraps the downstream connection in an upstream struct, but still completely bypasses this fake upstream's handlers
       //I don't blame you agentzh, you did what you had to do.
-      ctx->stream.prev_request_read_handler = r->read_event_handler;
-      r->read_event_handler = ngx_stream_lua_select_socket_read_request_handler;
-      ctx->socket[i].stream.prev_upstream_read_handler = NULL;
+      
+      if(readwrite & NGX_LUA_SELECT_READ) {
+        ctx->stream.prev_request_read_handler = r->read_event_handler;
+        r->read_event_handler = ngx_stream_lua_select_socket_read_request_handler;
+        ctx->socket[i].stream.prev_upstream_read_handler = NULL;
+      }
+      
+      if(readwrite & NGX_LUA_SELECT_WRITE) {
+        ctx->stream.prev_request_write_handler = r->write_event_handler;
+        r->write_event_handler = ngx_stream_lua_select_socket_write_request_handler;
+        ctx->socket[i].stream.prev_upstream_write_handler = NULL;
+      }
+      
       ctx->socket[i].type = NGX_LUA_SELECT_TCP_DOWNSTREAM;
     }
     else {
-      ctx->socket[i].stream.prev_upstream_read_handler = u->read_event_handler;
-      u->read_event_handler = ngx_stream_lua_select_socket_read_upstream_handler;
+      if(readwrite & NGX_LUA_SELECT_READ) {
+        ctx->socket[i].stream.prev_upstream_read_handler = u->read_event_handler;
+        u->read_event_handler = ngx_stream_lua_select_socket_read_upstream_handler;
+      }
+      else {
+        ctx->socket[i].stream.prev_upstream_read_handler = NULL;
+      }
+      
+      if(readwrite & NGX_LUA_SELECT_WRITE) {
+        ctx->socket[i].stream.prev_upstream_write_handler = u->write_event_handler;
+        u->write_event_handler = ngx_stream_lua_select_socket_write_upstream_handler;
+      }
+      else {
+        ctx->socket[i].stream.prev_upstream_write_handler = NULL;
+      }
+      
       ctx->socket[i].type = NGX_LUA_SELECT_TCP_UPSTREAM;
     }
     
-    //TODO: should this be ngx_add_event or ngx_handle_read_event?...
-    if(ngx_handle_read_event(c->read, NGX_READ_EVENT) != NGX_OK) {
-      return select_fail_cleanup(L, ctx, "failed to add read event", i);
+    if(readwrite & NGX_LUA_SELECT_READ) {
+      if(ngx_handle_read_event(c->read, NGX_READ_EVENT) != NGX_OK) {
+        select_fail_cleanup(L, ctx, i);
+        return luaL_argerror(L, 1, "failed to add read event for socket");
+      }
     }
     
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "gonna select on ev %p c:%p fd:%d", c->read, c, c->fd);
+    if(readwrite & NGX_LUA_SELECT_WRITE) {
+      if(ngx_handle_write_event(c->write, 0) != NGX_OK) {
+        select_fail_cleanup(L, ctx, i);
+        return luaL_argerror(L, 1, "failed to add write event for socket");
+      }
+    }
   }
   
   ctx->post_completion_ev.posted = 0;
@@ -367,11 +459,7 @@ static int lua_select_module_select_read(lua_State *L) {
   return lua_yield(L, 0);
 }
 
-static void ngx_stream_lua_select_socket_read_upstream_handler(ngx_stream_lua_request_t *r, ngx_stream_lua_socket_tcp_upstream_t *up) {
-  ngx_stream_lua_select_socket_read_request_handler(r);
-}
-
-static void ngx_stream_lua_select_socket_read_request_handler(ngx_stream_lua_request_t *r) {
+static void ngx_stream_lua_select_socket_event_activated(ngx_stream_lua_request_t *r) {
   ngx_lua_select_ctx_t                 *ctx;
 
   ngx_log_debug0(NGX_LOG_DEBUG_STREAM, r->connection->log, 0,
@@ -384,6 +472,20 @@ static void ngx_stream_lua_select_socket_read_request_handler(ngx_stream_lua_req
     ngx_post_event((&ctx->post_completion_ev), &ngx_posted_events);
   }
 }
+
+static void ngx_stream_lua_select_socket_write_upstream_handler(ngx_stream_lua_request_t *r, ngx_stream_lua_socket_tcp_upstream_t *up) {
+  ngx_stream_lua_select_socket_event_activated(r);
+}
+static void ngx_stream_lua_select_socket_read_upstream_handler(ngx_stream_lua_request_t *r, ngx_stream_lua_socket_tcp_upstream_t *up) {
+  ngx_stream_lua_select_socket_event_activated(r);
+}
+static void ngx_stream_lua_select_socket_write_request_handler(ngx_stream_lua_request_t *r) {
+  ngx_stream_lua_select_socket_event_activated(r);
+}
+static void ngx_stream_lua_select_socket_read_request_handler(ngx_stream_lua_request_t *r) {
+  ngx_stream_lua_select_socket_event_activated(r);
+}
+
 
 static void ngx_stream_lua_select_post_completion_handler(ngx_event_t *ev) {
   //modded copypasta from ngx_stream_lua_sleep.c ngx_stream_lua_sleep_handler()
@@ -429,17 +531,38 @@ static ngx_int_t ngx_stream_lua_select_resume(ngx_stream_lua_request_t *r) {
   streamctx->resume_handler = ngx_stream_lua_wev_handler;
   
   int ready_count = 0;
-  lua_createtable(coroL, ctx->count, 0);
+  lua_createtable(coroL, 1, 1); //chances are just 1 socket was ready. doesn't matter if there are more or fewer though
+  int socktable_index = lua_gettop(coroL);
+  
   for(unsigned i=0; i<ctx->count; i++) {
-    ngx_connection_t *c = ctx->socket[i].connection;
-    ngx_event_t      *rev = c->read;
-    int               sockref = ctx->socket[i].lua_socket_ref;
-    if(rev->ready) {
+    ngx_lua_select_socket_t *s = &ctx->socket[i];
+    ngx_connection_t        *c = s->connection;
+    int                      sockref = s->lua_socket_ref;
+    int                      read_ready = 0, write_ready = 0;
+    if((s->readwrite & NGX_LUA_SELECT_READ) && c->read->ready) {
+      read_ready = 1;
+    }
+    if((s->readwrite & NGX_LUA_SELECT_WRITE) && c->write->ready) {
+      write_ready = 1;
+    }
+    if(read_ready || write_ready) {
+      int sane_stack_top = lua_gettop(coroL);
       ready_count++;
-      lua_checkstack(coroL, 1);
+      lua_checkstack(coroL, 3);
       lua_rawgeti(coroL, LUA_REGISTRYINDEX, sockref);
-      lua_rawseti(coroL, -2, ready_count);
-      
+      lua_pushvalue(coroL, -1);
+      if(read_ready && write_ready) {
+        lua_pushliteral(coroL, "rw");
+      }
+      else if(read_ready) {
+        lua_pushliteral(coroL, "r");
+      }
+      else {
+        lua_pushliteral(coroL, "w");
+      }
+      lua_settable(coroL, socktable_index);
+      lua_rawseti(coroL, socktable_index, ready_count);
+      assert(lua_gettop(coroL) == sane_stack_top);
       //TODO: store [socket]=socket just like luasocket's select() function does
     }
   }

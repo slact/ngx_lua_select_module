@@ -101,6 +101,8 @@ for opt in $*; do
     openresty=*)
       OPENRESTY_VERSION="${opt:10}"
       ;;
+    lua_abort_on_error)
+      LUA_ABORT_AT_PANIC=1;;
     lua_no_jit)
       LUAJIT_DISABLE_JIT=1;;
     lua_no_apicheck|lua_no_debug)
@@ -172,6 +174,10 @@ _run_configure_step() {
   CFLAGS="${CFLAGS/-Werror/}" #no warning-as-error
   CONFIGURE=()
   LUAJIT_XCFLAGS=()
+  
+  if [[ $LUA_ABORT_AT_PANIC == 1 ]]; then
+    CFLAGS="$CFLAGS -DNGX_LUA_ABORT_AT_PANIC"
+  fi
   
   if [[ $LUAJIT_DISABLE_JIT == 1 ]]; then
     LUAJIT_XCFLAGS+=( -DLUAJIT_DISABLE_JIT )
