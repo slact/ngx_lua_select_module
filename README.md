@@ -55,7 +55,7 @@ ready = {
  
 ### Example
 ```nginx
--- a simple 2-way echo server with very little error handling
+# a simple 2-way echo server with very little error handling
 
 stream {
   server {
@@ -66,7 +66,7 @@ stream {
       local upsock = ngx.socket.tcp()
       assert(upsock:connect("127.0.0.1", 8092))
       
-      --setting read timeouts to 1 to ensure we don't yield for more than 1ms
+      --setting read timeouts to 1 to ensure we do not yield for more than 1ms
       --on socket:receive() after select()
       upsock:settimeouts(100, 30, 1)
       clientsock:settimeouts(100, 30, 1)
