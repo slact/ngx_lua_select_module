@@ -83,6 +83,7 @@ typedef struct {
   #endif
   };
   ngx_event_t             post_completion_ev; //added to ngx_post_event_queue when at least one event is activated
+  ngx_event_t             timer;
   int                     ref; //registry reference
   size_t                  count;
   ngx_lua_select_socket_t socket[];

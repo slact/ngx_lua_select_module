@@ -11,6 +11,7 @@ static void ngx_stream_lua_select_socket_read_upstream_handler(ngx_stream_lua_re
 static void ngx_stream_lua_select_socket_write_upstream_handler(ngx_stream_lua_request_t *r, ngx_stream_lua_socket_tcp_upstream_t *up);
 static ngx_int_t ngx_stream_lua_select_resume(ngx_stream_lua_request_t *r);
 static void ngx_stream_lua_select_ctx_cleanup_and_discard(ngx_stream_lua_request_t *r);
+static void ngx_stream_lua_select_timeout_handler(ngx_event_t *ev);
 
 
 static char *luaS_dbgval(lua_State *L, int n) {
@@ -297,12 +298,15 @@ static int lua_select_module_select_read(lua_State *L) {
   }
   
   
+  
   ctx = lua_newuserdata(L, sizeof(*ctx) + sizeof(*ctx->socket) * socketcount);
   if(ctx == NULL) {
     return luaL_error(L, "unable to allocate ctx");
   }
   ctx->count = socketcount;
   ctx->ref = luaL_ref(L, LUA_REGISTRYINDEX);
+  
+  ngx_memzero(&ctx->timer, sizeof(ctx->timer));
   
   ctx->stream.prev_request_write_handler = NULL;
   ctx->stream.prev_request_read_handler = NULL;
@@ -443,6 +447,14 @@ static int lua_select_module_select_read(lua_State *L) {
     }
   }
   
+  if(timeout > 0) {
+    ctx->timer.cancelable = 1;
+    ctx->timer.handler = ngx_stream_lua_select_timeout_handler;
+    ctx->timer.data = r;
+    ctx->timer.log = r->connection->log;
+    ngx_add_timer(&ctx->timer, timeout);
+  }
+  
   ctx->post_completion_ev.posted = 0;
   ctx->post_completion_ev.data = r;
   ctx->post_completion_ev.handler = ngx_stream_lua_select_post_completion_handler;
@@ -456,14 +468,12 @@ static int lua_select_module_select_read(lua_State *L) {
   coctx->cleanup = ngx_stream_lua_select_cleanup;
   coctx->data = r;
   
+  
   return lua_yield(L, 0);
 }
 
 static void ngx_stream_lua_select_socket_event_activated(ngx_stream_lua_request_t *r) {
   ngx_lua_select_ctx_t                 *ctx;
-
-  ngx_log_debug0(NGX_LOG_DEBUG_STREAM, r->connection->log, 0,
-                  "lua request socket read event handler");
 
   ctx = ngx_stream_lua_get_module_ctx(r, ngx_stream_lua_select_module);
   
@@ -473,6 +483,11 @@ static void ngx_stream_lua_select_socket_event_activated(ngx_stream_lua_request_
   }
 }
 
+
+static void ngx_stream_lua_select_timeout_handler(ngx_event_t *ev) {
+  ngx_stream_lua_request_t             *r = ev->data;
+  ngx_stream_lua_select_socket_event_activated(r);
+}
 static void ngx_stream_lua_select_socket_write_upstream_handler(ngx_stream_lua_request_t *r, ngx_stream_lua_socket_tcp_upstream_t *up) {
   ngx_stream_lua_select_socket_event_activated(r);
 }
@@ -498,8 +513,6 @@ static void ngx_stream_lua_select_post_completion_handler(ngx_event_t *ev) {
   ngx_stream_lua_ctx_t            *streamctx;
   ngx_stream_lua_co_ctx_t         *coctx;
 
-  r->read_event_handler = ctx->stream.prev_request_read_handler;
-  
   coctx = ctx->stream.coctx;
 
   streamctx = ngx_stream_lua_get_module_ctx(r, ngx_stream_lua_module);
@@ -563,9 +576,9 @@ static ngx_int_t ngx_stream_lua_select_resume(ngx_stream_lua_request_t *r) {
       lua_settable(coroL, socktable_index);
       lua_rawseti(coroL, socktable_index, ready_count);
       assert(lua_gettop(coroL) == sane_stack_top);
-      //TODO: store [socket]=socket just like luasocket's select() function does
     }
   }
+  
   ngx_stream_lua_select_ctx_cleanup_and_discard(r);
   
   //this is how the Lua thread is supposed to be resumed... this whole block of copypasta from EVERY resume handler inside Openresty.
@@ -575,8 +588,17 @@ static ngx_int_t ngx_stream_lua_select_resume(ngx_stream_lua_request_t *r) {
   ngx_int_t           rc;
   ngx_connection_t   *c = r->connection;
   ngx_uint_t          nreqs = c->requests;
-  
-  rc = ngx_stream_lua_run_thread(L, r, streamctx, 1);
+
+  if(ready_count == 0 && ctx->timer.timedout) {
+    //timeout error
+    lua_pop(coroL, 1); //pop the empty ready-sockets table
+    lua_pushnil(coroL);
+    lua_pushliteral(coroL, "timeout");
+    rc = ngx_stream_lua_run_thread(L, r, streamctx, 2);
+  }
+  else {
+    rc = ngx_stream_lua_run_thread(L, r, streamctx, 1);
+  }
   
   ngx_log_debug1(NGX_LOG_DEBUG_STREAM, r->connection->log, 0, "lua run thread returned %d", rc);
 
@@ -607,6 +629,10 @@ static void ngx_stream_lua_select_ctx_cleanup_and_discard(ngx_stream_lua_request
   ngx_lua_select_ctx_t            *ctx = ngx_stream_lua_get_module_ctx(r, ngx_stream_lua_select_module);
   ngx_stream_lua_ctx_t            *streamctx = ngx_stream_lua_get_module_ctx(r, ngx_stream_lua_module);
   lua_State                       *L = ngx_stream_lua_get_lua_vm(r, streamctx);
+  
+  if(ctx->timer.timer_set) {
+    ngx_del_timer(&ctx->timer);
+  }
   
   for(unsigned i=0; i<ctx->count; i++) {
     switch(ctx->socket[i].type) {
