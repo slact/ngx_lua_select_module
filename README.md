@@ -54,9 +54,8 @@ ready = {
  - Only supported for TCP sockets, not UDP. Openresty makes it hard to guess what type a given socket is without making syscalls. (Can be implemented as an ugly hack. I'm not opposed to ugly hacks, mind you, so ask me if you want this done)
  
 ### Example
-```
--- a simple 2-way echo server with very little error handling
 ```nginx
+-- a simple 2-way echo server with very little error handling
 
 stream {
   server {
