@@ -13,7 +13,7 @@ static ngx_int_t ngx_stream_lua_select_resume(ngx_stream_lua_request_t *r);
 static void ngx_stream_lua_select_ctx_cleanup_and_discard(ngx_stream_lua_request_t *r);
 static void ngx_stream_lua_select_timeout_handler(ngx_event_t *ev);
 
-
+/*
 static char *luaS_dbgval(lua_State *L, int n) {
   static char buf[512];
   int         type = lua_type(L, n);
@@ -216,6 +216,7 @@ static int lua_select_module_sigstop(lua_State *L) {
   raise(SIGSTOP);
   return 1;
 }
+*/
 
 static void select_fail_cleanup(lua_State *L, ngx_lua_select_ctx_t *ctx, int selected_so_far) {
   if(ctx && ctx->ref != LUA_NOREF) {
