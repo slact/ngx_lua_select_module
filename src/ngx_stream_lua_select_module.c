@@ -235,14 +235,18 @@ static void select_fail_cleanup(lua_State *L, ngx_lua_select_ctx_t *ctx, int sel
       case NGX_LUA_SELECT_UDP_DOWNSTREAM:
         c = s->stream.udp.up->udp_connection.connection;
         break;
+      default:
+        ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "unexpected socket type on select fail cleanup");
+        c = NULL;
+        break;
     }
-    if((s->readwrite & NGX_LUA_SELECT_READ) && c->read->active) {
+    if((s->readwrite & NGX_LUA_SELECT_READ) && c && c->read->active) {
       //this may be going too far. could break future reads or something.
       //however it looks like all the other openresty API functions that use these events
       //call ngx_add_event as needed and never assume they're already added
       ngx_del_event(c->read, NGX_READ_EVENT, 0);
     }
-    if((s->readwrite & NGX_LUA_SELECT_WRITE) && c->write->active) {
+    if((s->readwrite & NGX_LUA_SELECT_WRITE) && c && c->write->active) {
       //this may be going too far. could break future reads or something.
       //however it looks like all the other openresty API functions that use these events
       //call ngx_add_event as needed and never assume they're already added
@@ -653,6 +657,9 @@ static void ngx_stream_lua_select_ctx_cleanup_and_discard(ngx_stream_lua_request
       case NGX_LUA_SELECT_UDP_DOWNSTREAM:
         //NOT IMPLEMENTED
         raise(SIGABRT);
+        break;
+      default:
+        ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "unexpected socket type on select cleanup");
         break;
     }
     /*
