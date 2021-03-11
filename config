@@ -6,6 +6,7 @@ ngx_module_deps="${ngx_addon_dir}/src/ngx_lua_select.h"
 _ngx_http_lua_module_src=../ngx_lua-*/src
 _ngx_stream_lua_module_src=../ngx_stream_lua-*/src
 ngx_module_incs="${ngx_addon_dir}/src ${_ngx_http_lua_module_src} ${_ngx_stream_lua_module_src}"
+ngx_feature_libs=""
 
 . auto/have
 
