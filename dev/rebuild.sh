@@ -148,8 +148,8 @@ _prepare_build() {
     tar -xf openresty-${OPENRESTY_VERSION}.tar.gz
   fi
   
-  ln -sf "openresty-${OPENRESTY_VERSION}" "openresty"
-  ln -sf "openresty-${OPENRESTY_VERSION}/nginx" "nginx"
+  ln -sfT "./openresty-${OPENRESTY_VERSION}" "./openresty"
+  ln -sfT "openresty-${OPENRESTY_VERSION}/nginx" "./nginx"
   return 0
 }
 
@@ -281,15 +281,22 @@ _run_configure_step() {
   export CC=$CC
   export LDFLAGS=$LDFLAGS
   
+  if ./configure --help | grep "with-luajit-ldflags" -q; then
+    echo "YEAH WE GOT LDXCFLAGS or whatever"
+    LUAJIT_LDFLAGS_CONFIG="--with-luajit-ldflags=${LDFLAGS}"
+  else
+    LUAJIT_LDFLAGS_CONFIG=""
+  fi
+  
   if ! [[ -z $CLANG_ANALYZER ]]; then
-    scan-build -o "$CLANG_ANALYZER" ./configure "--with-cc=${CC}" "--with-cc-opt=${CFLAGS}" "--with-ld-opt=${LDFLAGS}" "--with-luajit-ldflags=${LDFLAGS}" "--with-luajit-xcflags=${LUAJIT_XCFLAGS}" ${CONFIGURE[@]}
+    scan-build -o "$CLANG_ANALYZER" ./configure "--with-cc=${CC}" "--with-cc-opt=${CFLAGS}" "--with-ld-opt=${LDFLAGS}" "${LUAJIT_LDFLAGS_CONFIG}" "--with-luajit-xcflags=${LUAJIT_XCFLAGS}" ${CONFIGURE[@]}
   else
     if command -v ccache >/dev/null && [[ ! $CC == ccache* ]]; then
       CC="ccache ${CC}"
     fi
     pwd;
-    echo ./configure --with-cc="${CC}" "--with-cc-opt=${CFLAGS}" "--with-ld-opt=${LDFLAGS}" "--with-luajit-ldflags=${LDFLAGS}" "--with-luajit-xcflags=${LUAJIT_XCFLAGS}" ${CONFIGURE[@]}
-    ./configure "--with-cc=${CC}" "--with-cc-opt=${CFLAGS}" "--with-ld-opt=${LDFLAGS}" "--with-luajit-ldflags=${LDFLAGS}" "--with-luajit-xcflags=${LUAJIT_XCFLAGS}" ${CONFIGURE[@]}
+    echo ./configure --with-cc="${CC}" "--with-cc-opt=${CFLAGS}" "--with-ld-opt=${LDFLAGS}" "${LUAJIT_LDFLAGS_CONFIG}" "--with-luajit-xcflags=${LUAJIT_XCFLAGS}" ${CONFIGURE[@]}
+    ./configure "--with-cc=${CC}" "--with-cc-opt=${CFLAGS}" "--with-ld-opt=${LDFLAGS}" ${LUAJIT_LDFLAGS_CONFIG} "--with-luajit-xcflags=${LUAJIT_XCFLAGS}" ${CONFIGURE[@]}
   fi
   
   return $?
