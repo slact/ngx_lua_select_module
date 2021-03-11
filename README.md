@@ -3,32 +3,32 @@ non-blocking `select()` inside the Nginx event loop for Openresty cosockets. Goo
 # API
 
 ```lua
-local select = require "ngx.select"
+local ngx_select = require "ngx.select"
 ```
 
-### `select({sockets}, [timeout])`
+### `ngx_select({sockets}, [timeout])`
 
 Waits until at least one socket is ready for reading or writing, or timeout is reached.
 
 **First argument** is a table of cosockets from `ngx.req.socket()` or `ngx.socket.tcp()` or `ngx.socket.udp()`.
 
 ```lua
-select({[sock1]="r", [sock2]="w", [sock3]="rw"})
+ngx_select({[sock1]="r", [sock2]="w", [sock3]="rw"})
 --wait until sock1 is read-ready OR sock2 is write-ready OR sock3 is read-or-write-ready
 ```
 
 ```lua
-select({sock1, sock2, sock3})
+ngx_select({sock1, sock2, sock3})
 --wait until sock1 OR sock2 OR sock3 are read-ready. equivalent to
-select({[sock1]="r", [sock2]="r", [sock3]="r"})
+ngx_select({[sock1]="r", [sock2]="r", [sock3]="r"})
 ```
-`select()` will error out if any of the sockets passed in are closed or aren't sockets.
+`ngx_select()` will error out if any of the sockets passed in are closed or aren't sockets.
 
 
 **Second argument** is an optional wait timeout, in milliseconds.
 
 ```lua
-select({socket1, socket2}, 1000)
+ngx_select({socket1, socket2}, 1000)
 ```
 
 **Returns** a table of ready sockets, or `nil, error_string` on error (such as `"timeout"`)
@@ -36,7 +36,7 @@ select({socket1, socket2}, 1000)
 Ready sockets table has numerically indexed sockets, and socket-indexed event-types:
 
 ```lua
-local ready, err = select({[sock1]="rw", [sock2]="rw"})
+local ready, err = ngx_select({[sock1]="rw", [sock2]="rw"})
 --let's say sock1 is read-ready, and sock2 is write-ready
 
 --ready looks like this:
@@ -49,7 +49,7 @@ ready = {
 ```
 
 ### Caveats
- - If you plan on being absolutely sure your socket reads and writes don't yield the Lua thread after the `select()` reports the sockets as ready, set their timeouts to `1` in Openresty. `0` would be nice but Openresty ignores it, so `1` is good enough. (The thread actually yields with this timeout but then resumes immediately after)
+ - If you plan on being absolutely sure your socket reads and writes don't yield the Lua thread after the `ngx_select()` reports the sockets as ready, set their timeouts to `1` in Openresty. `0` would be nice but Openresty ignores it, so `1` is good enough. (The thread actually yields with this timeout but then resumes immediately after)
  - Only implemented for the Lua stream module, not HTTP. (ask me if you want this done)
  - Only supported for TCP sockets, not UDP. Openresty makes it hard to guess what type a given socket is without making syscalls. (Can be implemented as an ugly hack. I'm not opposed to ugly hacks, mind you, so ask me if you want this done)
  
@@ -75,16 +75,16 @@ local upsock = ngx.socket.tcp()
 assert(upsock:connect("127.0.0.1", 8092))
 
 --setting read timeouts to 1 to ensure we do not yield for more than 1ms
---on socket:receive() after select()
+--on socket:receive() after ngx_select()
 upsock:settimeouts(100, 30, 1)
 clientsock:settimeouts(100, 30, 1)
 
 while true do
   --select clientsock and upsock for read-readiness, but wait no more than 5000 milliseconds
-  local socks, err = select({clientsock, upsock}, 5000)
+  local socks, err = ngx_select({clientsock, upsock}, 5000)
   
   if socks == nil then
-    ngx.log(ngx.NOTICE, "got select() error:" .. tostring(err))
+    ngx.log(ngx.NOTICE, "got ngx_select() error:" .. tostring(err))
     break
   end
   
