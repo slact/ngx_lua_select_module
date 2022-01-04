@@ -17,11 +17,14 @@ ngx_module_libs=$ngx_feature_libs
 . auto/module
 
 if [ $STREAM = NO ]; then
-	echo "Skipping ngx_lua_select_module for ngx_stream_module"
+  echo "Skipping ngx_lua_select_module for ngx_stream_module"
 else
-	ngx_module_type=STREAM
-	ngx_module_name=ngx_stream_lua_select_module
-	ngx_module_srcs="${ngx_addon_dir}/src/ngx_stream_lua_select_module.c"
-	ngx_module_libs=$ngx_feature_libs
-	. auto/module
+  ngx_module_type=STREAM
+  ngx_module_name=ngx_stream_lua_select_module
+  ngx_module_srcs=" \
+    ${ngx_addon_dir}/src/ngx_lua_select.c \
+    ${ngx_addon_dir}/src/ngx_stream_lua_select_module.c \
+  "
+  ngx_module_libs=$ngx_feature_libs
+  . auto/module
 fi

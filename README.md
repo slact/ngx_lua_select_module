@@ -25,7 +25,7 @@ ngx_select({[sock1]="r", [sock2]="r", [sock3]="r"})
 `ngx_select()` will error out if any of the sockets passed in are closed or aren't sockets.
 
 
-**Second argument** is an optional wait timeout, in milliseconds.
+**Second argument** is an optional wait timeout, in milliseconds. A timeout of 0 is treated as "no timeout".
 
 ```lua
 ngx_select({socket1, socket2}, 1000)

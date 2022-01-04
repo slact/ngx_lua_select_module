@@ -2,6 +2,7 @@
 #include "ngx_lua_select.h"
 #include <ngx_stream_lua_util.h>
 #include <assert.h>
+#include <sys/ioctl.h>
 
 static void ngx_stream_lua_select_cleanup(void *data);
 static void ngx_stream_lua_select_post_completion_handler(ngx_event_t *ev);
@@ -12,211 +13,6 @@ static void ngx_stream_lua_select_socket_write_upstream_handler(ngx_stream_lua_r
 static ngx_int_t ngx_stream_lua_select_resume(ngx_stream_lua_request_t *r);
 static void ngx_stream_lua_select_ctx_cleanup_and_discard(ngx_stream_lua_request_t *r);
 static void ngx_stream_lua_select_timeout_handler(ngx_event_t *ev);
-
-/*
-static char *luaS_dbgval(lua_State *L, int n) {
-  static char buf[512];
-  int         type = lua_type(L, n);
-  const char *typename = lua_typename(L, type);
-  const char *str;
-  lua_Number  num;
-  
-  char *cur = buf;
-  int top = lua_gettop(L);
-  switch(type) {
-    case LUA_TNUMBER:
-      num = lua_tonumber(L, n);
-      sprintf(cur, "%s: %f", typename, num);
-      break;
-    case LUA_TBOOLEAN:
-      sprintf(cur, "%s: %s", typename, lua_toboolean(L, n) ? "true" : "false");
-      break;
-    case LUA_TSTRING:
-      str = lua_tostring(L, n);
-      sprintf(cur, "%s: \"%.50s%s\"", typename, str, strlen(str) > 50 ? "..." : "");
-      break;
-    case LUA_TTABLE:
-      luaL_checkstack(L, 8, NULL);
-      if(lua_status(L) == LUA_OK) {
-        lua_getglobal(L, "tostring");
-        lua_pushvalue(L, n);
-        lua_call(L, 1, 1);
-        str = lua_tostring(L, -1);
-        cur += sprintf(cur, "%s", str);
-        lua_pop(L, 1);
-      }
-      else {
-        cur += sprintf(cur, "table: %p", lua_topointer(L, n));
-      }
-      
-      
-      //is it a global?
-      if(lua_equal(L, -1, LUA_GLOBALSINDEX)) {
-        //it's the globals table
-        sprintf(cur, "%s", " _G");
-        lua_pop(L, 1);
-        break;
-      }
-      lua_pushnil(L);
-      while(lua_next(L, LUA_GLOBALSINDEX)) {
-        if(lua_equal(L, -1, n)) {
-          cur += sprintf(cur, " _G[\"%s\"]", lua_tostring(L, -2));
-          lua_pop(L, 2);
-          break;
-        }
-        lua_pop(L, 1);
-      }
-      
-      //is it a loaded module?
-      lua_getglobal(L, "package");
-      lua_getfield(L, -1, "loaded");
-      lua_remove(L, -2);
-      lua_pushnil(L);  // first key
-      while(lua_next(L, -2) != 0) {
-        
-        if(lua_equal(L, -1, n)) {
-        //it's the globals table
-          sprintf(cur, " module \"%s\"", lua_tostring(L, -2));
-          lua_pop(L, 2);
-          break;
-        }
-        lua_pop(L, 1);
-      }
-      lua_pop(L, 1);
-      break;
-    case LUA_TLIGHTUSERDATA:
-      luaL_checkstack(L, 2, NULL);
-      if(lua_status(L) == LUA_OK) {
-        lua_getglobal(L, "tostring");
-        lua_pushvalue(L, n);
-        lua_call(L, 1, 1);
-        sprintf(cur, "light %s", lua_tostring(L, -1));
-        lua_pop(L, 1);
-      }
-      else {
-        sprintf(cur, "light userdata: %p", lua_topointer(L, n));
-      }
-      break;
-    case LUA_TFUNCTION: {
-      luaL_checkstack(L, 3, NULL);
-      lua_Debug dbg;
-      lua_pushvalue(L, n);
-      lua_getinfo(L, ">nSlu", &dbg);
-      
-      if(lua_status(L) == LUA_OK) {
-        lua_getglobal(L, "tostring");
-        lua_pushvalue(L, n);
-        lua_call(L, 1, 1);
-      }
-      else {
-        lua_pushfstring(L, "function: %p", lua_topointer(L, n));
-      }
-      
-      sprintf(cur, "%s%s%s%s%s%s %s:%d", lua_iscfunction(L, n) ? "c " : "", lua_tostring(L, -1), strlen(dbg.namewhat)>0 ? " ":"", dbg.namewhat, dbg.name?" ":"", dbg.name?dbg.name:"", dbg.short_src, dbg.linedefined);
-      lua_pop(L, 1);
-      
-      break;
-    }
-    case LUA_TTHREAD: {
-      lua_State *coro = lua_tothread(L, n);
-      luaL_checkstack(L, 4, NULL);
-      luaL_checkstack(coro, 1, NULL);
-      
-      if(lua_status(L) == LUA_OK) {
-        lua_getglobal(L, "tostring");
-        lua_pushvalue(L, n);
-        lua_call(L, 1, 1);
-      }
-      else {
-        lua_pushfstring(L, "thread: %p", lua_topointer(L, n));
-      }
-      
-      char *status = NULL;
-      switch(lua_status(L)) {
-        case LUA_OK: {
-          lua_Debug ar;
-          if (lua_getstack(L, 0, &ar) > 0) {  // does it have frames? 
-            status = "normal";
-          }
-          else if (lua_gettop(L) == 0) {
-            status = "dead";
-          }
-          else {
-            status ="suspended";  // initial state 
-          }
-          break;
-        }
-        case LUA_YIELD:
-          status = "suspended";
-          break;
-        default:
-          status = "dead";
-          break;
-      }
-      lua_pushstring(L, status);
-      
-      luaL_where(coro, 1);
-      if(L == coro) {
-        sprintf(cur, "%s (self) (%s) @ %s", lua_tostring(L, -3), lua_tostring(L, -2), lua_tostring(coro, -1));
-        lua_pop(L, 3);
-      }
-      else {
-        sprintf(cur, "%s (%s) @ %s", lua_tostring(L, -2), lua_tostring(L, -1), lua_tostring(coro, -1));
-        lua_pop(L, 2);
-        lua_pop(coro, 1);
-      }
-      break;
-    }
-    
-    case LUA_TNIL:
-      sprintf(cur, "%s", "nil");
-      break;
-    
-    default:
-      if(lua_status(L) == LUA_OK) {
-        luaL_checkstack(L, 2, NULL);
-        lua_getglobal(L, "tostring");
-        lua_pushvalue(L, n);
-        lua_call(L, 1, 1);
-        str = lua_tostring(L, -1);
-        
-        sprintf(cur, "%s", str);
-        lua_pop(L, 1);
-      }
-      else {
-        sprintf(cur, "%s: %p", lua_typename(L, type), lua_topointer(L, n));
-      }
-      break;
-  }
-  assert(lua_gettop(L)==top);
-  return buf;
-}
-static void luaS_printstack_named(lua_State *L, const char *name) {
-  int        top = lua_gettop(L);
-  const char line[256];
-  luaL_Buffer buf;
-  luaL_buffinit(L, &buf);
-  
-  sprintf((char *)line, "lua stack %s:", name);
-  luaL_addstring(&buf, line);
-  
-  for(int n=top; n>0; n--) {
-    snprintf((char *)line, 256, "\n                               [%-2i  %i]: %s", -(top-n+1), n, luaS_dbgval(L, n));
-    luaL_addstring(&buf, line);
-  }
-  luaL_checkstack(L, 1, NULL);
-  luaL_pushresult(&buf);
-  const char *stack = lua_tostring(L, -1);
-  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "%s", stack);
-  lua_pop(L, 1);
-  assert(lua_gettop(L) == top);
-}
-
-static int lua_select_module_sigstop(lua_State *L) {
-  raise(SIGSTOP);
-  return 1;
-}
-*/
 
 static void select_fail_cleanup(lua_State *L, ngx_lua_select_ctx_t *ctx, int selected_so_far) {
   if(ctx && ctx->ref != LUA_NOREF) {
@@ -263,6 +59,7 @@ static int lua_select_module_select(lua_State *L) {
   
   ngx_lua_select_ctx_t                *ctx = NULL;
   int                                  n = lua_gettop(L);
+  int                                  i;
   
   if(n == 0) {
     return luaL_error(L, "expected more than 0 arguments");
@@ -302,8 +99,6 @@ static int lua_select_module_select(lua_State *L) {
     lua_pop(L, 1);
   }
   
-  
-  
   ctx = lua_newuserdata(L, sizeof(*ctx) + sizeof(*ctx->socket) * socketcount);
   if(ctx == NULL) {
     return luaL_error(L, "unable to allocate ctx");
@@ -317,11 +112,13 @@ static int lua_select_module_select(lua_State *L) {
   ctx->stream.prev_request_read_handler = NULL;
   
   lua_pushnil(L);
-  for(int i=0; lua_next(L, 1) != 0; i++) {
-    //TODO: detect if this is a TCP or UDP socket.
-    //for now just assume it's TCP
-    
+  for(i=0; lua_next(L, 1) != 0; i++) {
     int readwrite = 0;
+    
+    // TODO: figure out if this is a TCP or UDP socket. they need slightly different treatment,
+    //  but OpenResty doesn't make it easy to know. 
+    
+    //For now, assume it's a TCP socket
     
     ngx_stream_lua_socket_tcp_upstream_t        *u;
     if(lua_isnumber(L, -2)) { //numeric key, assume it's strictly for reading
@@ -397,59 +194,73 @@ static int lua_select_module_select(lua_State *L) {
     ngx_connection_t *c = u->peer.connection;
     ctx->socket[i].connection = c;
     
-    if(c == r->connection) {
-      //this is the originating request's connection
-      //it's handled differently than "upstreams" created with ngx.socket.tcp()
-      //fuckin' openresty.. creating an ngx.req.socket() wraps the downstream connection in an upstream struct, but still completely bypasses this fake upstream's handlers
-      //I don't blame you agentzh, you did what you had to do.
+    ctx->socket[i].type = ngx_lua_select_get_socket_type(L, ctx->socket[i].lua_socket_ref, c, r->connection);
+  }
+
+  char *err;
+  int sockets_already_ready = ngx_lua_select_sockets_ready(ctx, &err);
+  if(err) {
+    select_fail_cleanup(L, ctx, i);
+    return luaL_error(L, err);
+  }
+  if(sockets_already_ready) {
+    ngx_log_error(NGX_LOG_WARN, r->connection->log, 0, "Detected bytes already waiting to be read on socket when using the select module");
+    int retcount = ngx_lua_select_push_result(L, ctx);
+    ngx_stream_lua_select_ctx_cleanup_and_discard(r);
+    return retcount;
+  }
+  
+  for(i=0; i < socketcount; i++) {
+    int rw = ctx->socket[i].readwrite;
+    ngx_lua_select_socket_t *s = &ctx->socket[i];
+    
+    switch(s->type) {
+      case NGX_LUA_SELECT_TCP_DOWNSTREAM:
+        //this is the originating request's connection
+        //it's handled differently than "upstreams" created with ngx.socket.tcp()
+        //fuckin' openresty.. creating an ngx.req.socket() wraps the downstream connection in an upstream struct, but still completely bypasses this fake upstream's handlers
+        //I don't blame you agentzh, you did what you had to do.
+        
+        if(rw & NGX_LUA_SELECT_READ) {
+          ctx->stream.prev_request_read_handler = r->read_event_handler;
+          r->read_event_handler = ngx_stream_lua_select_socket_read_request_handler;
+          s->stream.prev_upstream_read_handler = NULL;
+        }
+        
+        if(rw & NGX_LUA_SELECT_WRITE) {
+          ctx->stream.prev_request_write_handler = r->write_event_handler;
+          r->write_event_handler = ngx_stream_lua_select_socket_write_request_handler;
+          s->stream.prev_upstream_write_handler = NULL;
+        }
+        break;
       
-      if(readwrite & NGX_LUA_SELECT_READ) {
-        ctx->stream.prev_request_read_handler = r->read_event_handler;
-        r->read_event_handler = ngx_stream_lua_select_socket_read_request_handler;
-        ctx->socket[i].stream.prev_upstream_read_handler = NULL;
-      }
-      
-      if(readwrite & NGX_LUA_SELECT_WRITE) {
-        ctx->stream.prev_request_write_handler = r->write_event_handler;
-        r->write_event_handler = ngx_stream_lua_select_socket_write_request_handler;
-        ctx->socket[i].stream.prev_upstream_write_handler = NULL;
-      }
-      
-      ctx->socket[i].type = NGX_LUA_SELECT_TCP_DOWNSTREAM;
-    }
-    else {
-      if(readwrite & NGX_LUA_SELECT_READ) {
-        ctx->socket[i].stream.prev_upstream_read_handler = u->read_event_handler;
-        u->read_event_handler = ngx_stream_lua_select_socket_read_upstream_handler;
-      }
-      else {
-        ctx->socket[i].stream.prev_upstream_read_handler = NULL;
-      }
-      
-      if(readwrite & NGX_LUA_SELECT_WRITE) {
-        ctx->socket[i].stream.prev_upstream_write_handler = u->write_event_handler;
-        u->write_event_handler = ngx_stream_lua_select_socket_write_upstream_handler;
-      }
-      else {
-        ctx->socket[i].stream.prev_upstream_write_handler = NULL;
-      }
-      
-      ctx->socket[i].type = NGX_LUA_SELECT_TCP_UPSTREAM;
+      case NGX_LUA_SELECT_TCP_UPSTREAM:
+        if(rw & NGX_LUA_SELECT_READ) {
+          s->stream.prev_upstream_read_handler = s->stream.tcp.up->read_event_handler;
+          s->stream.tcp.up->read_event_handler = ngx_stream_lua_select_socket_read_upstream_handler;
+        }
+        else {
+          s->stream.prev_upstream_read_handler = NULL;
+        }
+        
+        if(rw & NGX_LUA_SELECT_WRITE) {
+          s->stream.prev_upstream_write_handler = s->stream.tcp.up->write_event_handler;
+          s->stream.tcp.up->write_event_handler = ngx_stream_lua_select_socket_write_upstream_handler;
+        }
+        else {
+          s->stream.prev_upstream_write_handler = NULL;
+        }
+        break;
+        
+      case NGX_LUA_SELECT_UDP_UPSTREAM:
+      case NGX_LUA_SELECT_UDP_DOWNSTREAM:
+        select_fail_cleanup(L, ctx, i);
+        return luaL_argerror(L, 1, "UDP sockets not yet supported");
+        break;
     }
     
-    if(readwrite & NGX_LUA_SELECT_READ) {
-      if(ngx_handle_read_event(c->read, NGX_READ_EVENT) != NGX_OK) {
-        select_fail_cleanup(L, ctx, i);
-        return luaL_argerror(L, 1, "failed to add read event for socket");
-      }
-    }
-    
-    if(readwrite & NGX_LUA_SELECT_WRITE) {
-      if(ngx_handle_write_event(c->write, 0) != NGX_OK) {
-        select_fail_cleanup(L, ctx, i);
-        return luaL_argerror(L, 1, "failed to add write event for socket");
-      }
-    }
+    ctx->socket[i].read_ready = 0;
+    ctx->socket[i].write_ready = 0;
   }
   
   if(timeout > 0) {
@@ -548,42 +359,19 @@ static ngx_int_t ngx_stream_lua_select_resume(ngx_stream_lua_request_t *r) {
   //seems like this is the resume handler everyone else in ngx_stream_lua-land sets after theirs is finished
   streamctx->resume_handler = ngx_stream_lua_wev_handler;
   
-  int ready_count = 0;
   lua_createtable(coroL, 1, 1); //chances are just 1 socket was ready. doesn't matter if there are more or fewer though
-  int socktable_index = lua_gettop(coroL);
-  
   for(unsigned i=0; i<ctx->count; i++) {
-    ngx_lua_select_socket_t *s = &ctx->socket[i];
-    ngx_connection_t        *c = s->connection;
-    int                      sockref = s->lua_socket_ref;
-    int                      read_ready = 0, write_ready = 0;
+    ngx_lua_select_socket_t   *s = &ctx->socket[i];
+    ngx_connection_t          *c = s->connection;
+    
     if((s->readwrite & NGX_LUA_SELECT_READ) && c->read->ready) {
-      read_ready = 1;
+      s->read_ready = 1;
     }
     if((s->readwrite & NGX_LUA_SELECT_WRITE) && c->write->ready) {
-      write_ready = 1;
-    }
-    if(read_ready || write_ready) {
-      int sane_stack_top = lua_gettop(coroL);
-      ready_count++;
-      lua_checkstack(coroL, 3);
-      lua_rawgeti(coroL, LUA_REGISTRYINDEX, sockref);
-      lua_pushvalue(coroL, -1);
-      if(read_ready && write_ready) {
-        lua_pushliteral(coroL, "rw");
-      }
-      else if(read_ready) {
-        lua_pushliteral(coroL, "r");
-      }
-      else {
-        lua_pushliteral(coroL, "w");
-      }
-      lua_settable(coroL, socktable_index);
-      lua_rawseti(coroL, socktable_index, ready_count);
-      assert(lua_gettop(coroL) == sane_stack_top);
+      s->write_ready = 1;
     }
   }
-  
+  int retcount = ngx_lua_select_push_result(coroL, ctx);
   ngx_stream_lua_select_ctx_cleanup_and_discard(r);
   
   //this is how the Lua thread is supposed to be resumed... this whole block of copypasta from EVERY resume handler inside Openresty.
@@ -594,16 +382,7 @@ static ngx_int_t ngx_stream_lua_select_resume(ngx_stream_lua_request_t *r) {
   ngx_connection_t   *c = r->connection;
   ngx_uint_t          nreqs = c->requests;
 
-  if(ready_count == 0 && ctx->timer.timedout) {
-    //timeout error
-    lua_pop(coroL, 1); //pop the empty ready-sockets table
-    lua_pushnil(coroL);
-    lua_pushliteral(coroL, "timeout");
-    rc = ngx_stream_lua_run_thread(L, r, streamctx, 2);
-  }
-  else {
-    rc = ngx_stream_lua_run_thread(L, r, streamctx, 1);
-  }
+  rc = ngx_stream_lua_run_thread(L, r, streamctx, retcount);
   
   ngx_log_debug1(NGX_LOG_DEBUG_STREAM, r->connection->log, 0, "lua run thread returned %d", rc);
 
