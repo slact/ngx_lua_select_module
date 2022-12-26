@@ -228,15 +228,15 @@ static int lua_select_module_select(lua_State *L) {
           ctx->stream.prev_request_read_handler = r->read_event_handler;
           r->read_event_handler = ngx_stream_lua_select_socket_read_request_handler;
           s->stream.prev_upstream_read_handler = NULL;
+          ngx_handle_read_event(s->connection->read, 0);
         }
         
         if(rw & NGX_LUA_SELECT_WRITE) {
           ctx->stream.prev_request_write_handler = r->write_event_handler;
           r->write_event_handler = ngx_stream_lua_select_socket_write_request_handler;
           s->stream.prev_upstream_write_handler = NULL;
+          ngx_handle_write_event(s->connection->write, 0);
         }
-        if(!s->connection->read->active || !s->connection->write->active)
-          ngx_add_conn(s->connection);
         break;
       
       case NGX_LUA_SELECT_TCP_UPSTREAM:
