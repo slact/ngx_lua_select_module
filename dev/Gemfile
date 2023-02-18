@@ -7,3 +7,11 @@ gem 'minitest'
 gem 'minitest-reporters'
 
 gem "hsss"
+
+gem "binding_of_caller"
+gem "rspec"
+gem "async"
+gem "async-io"
+gem "async-await"
+gem "async-rspec"
+
