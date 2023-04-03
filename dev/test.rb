@@ -44,7 +44,7 @@ class SelectModuleTest < Minitest::Test
   test "client socket echo" do
     #runs client_socket_echo test in openresty
     echo_prefix="got_it."
-    resty = upstream(echo_prefix: echo_prefix)
+    resty = upstream(echo_prefix: echo_prefix, clients: 0)
     (1..1000).each do |n|
       msg = "hello this is message number #{n}" * n
       resty.puts msg
@@ -63,6 +63,8 @@ class SelectModuleTest < Minitest::Test
       msg = "uptest #{n}"
       clients.each do |client|
         client.puts msg
+      end
+      clients.shuffle.each do |client|
         assert_equal msg, client.gets
       end
     end
@@ -73,15 +75,34 @@ class SelectModuleTest < Minitest::Test
     server.stop
     resty.stop
   end
+
+  notest "client socket echo: no read timeouts" do
+    #runs upstream_socket_echo test in testnameopenresty
+    #test name after colon is not sent to openresty
+    resty = upstream(clients: 0)
+  end
   
   notest "upstream socket echo: no read timeouts" do
     #runs upstream_socket_echo test in testnameopenresty
     #test name after colon is not sent to openresty
-    resty_client, server = upstream()
+    resty, server, clients = upstream(exclude_resty_client: true, clients: 1)
   end
   
-  notest "skip this test" do
-    flunk "fail me if i'm run"
+  notest "upstream readwrite select: no timeouts at all" do
+    #TODO
+  end
+  
+  notest "select invalid things: not a socket" do
+    #TODO
+  end
+  notest "select invalid things: closed socket" do
+    #TODO
+  end
+  notest "select invalid things: not a table" do
+    #TODO
+  end
+  notest "select invalid things: bad mode string" do
+    #TODO
   end
     
 end
