@@ -18,11 +18,12 @@ class BetterSpecReporter < Minitest::Reporters::SpecReporter
     print pad_test(test_name)                                                                                                          
     print yellow("...")                                                                                                                
   end                                                                                                                                  
-  def record_print_status(test)                                                                                                        
+  def record_print_status(test)  
     print ANSI::Code.left(4)                                                                                                           
     print_colored_status(test)                                                                                                         
-    print(" (%.2fs)" % test.time) unless test.time.nil?                                                                                
-    puts                                                                                                                               
+    print(" (%.2fs)" % test.time) unless test.time.nil?
+    print(" (#{test.assertions} assert#{test.assertions == 1 ? "" : "s"})")
+    puts
   end                                                                                                                                  
 end   
 Minitest::Reporters.use! BetterSpecReporter.new
