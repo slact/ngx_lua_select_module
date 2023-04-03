@@ -7,7 +7,7 @@ $openresty_port = '8083'
 class SelectModuleTest < Minitest::Test
   include TestHelp
   extend TestHelp::Sugar
-  DEFAULT_TIMEOUT_SEC = 500
+  DEFAULT_TIMEOUT_SEC = 5
   
   def upstream(args = {})
     args[:clients]||= 0
