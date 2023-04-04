@@ -81,6 +81,48 @@ class SelectModuleTest < Minitest::Test
     resty.stop
   end
 
+  test "upstream socket receiveany: no timeouts" do
+    resty, server, clients = upstream(clients: 10, exclude_resty_client: true)
+    #resty.monitor_test!
+    
+    (1..100).each do |n|
+      msg = "message #{n}"
+      clients.each do |c|
+        c.puts msg
+      end
+      clients.each do |c|
+        assert_equal msg, c.gets
+      end
+    end
+    clients.each do |c|
+      c.puts "!FIN"
+      c.wait.stop
+    end
+    server.stop
+    resty.stop
+  end
+  
+  test "upstream socket receiveany: large messages" do
+    resty, server, clients = upstream(clients: 1, exclude_resty_client: true)
+    #resty.monitor_test!
+    
+    (1..100).each do |n|
+      msg = "0123456789" * n
+      clients.each do |c|
+        c.puts msg
+      end
+      clients.each do |c|
+        assert_equal msg, c.gets
+      end
+    end
+    clients.each do |c|
+      c.puts "!FIN"
+      c.wait.stop
+    end
+    server.stop
+    resty.stop
+  end
+  
   notest "client socket echo: no read timeouts" do
     #runs upstream_socket_echo test in testnameopenresty
     #test name after colon is not sent to openresty

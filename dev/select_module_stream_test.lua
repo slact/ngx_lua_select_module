@@ -96,11 +96,31 @@ function tests.upstream_socket_echo(arg)
   end
 end
 
+
+function tests.upstream_socket_receiveany(arg)
+  local select_read = create_select_table(arg)
+  
+  local buf = {}
+  for sock, mode in pairs(select_read) do
+    buf[sock] = Msgbuf.new()
+  end
+  
+  while true do
+    local socks, err = ngx_select(select_read, arg.select_timeout)
+    if not socks then
+      error("ngx_select error: " .. tostring(err))
+    end
+    for _, sock in ipairs(socks) do
+      local data, err = buf[sock]:receiveany(sock)
+      if err then
+        mm(sock)
+        error("socket " .. tostring(sock) .. " receiveany error: " .. tostring(err))
+      end
+      for msg in buf[sock]:each_message() do
+        mm(msg)
         if msg == "!FIN" then
-          clientsock:send("!FIN\n")
           return
         end
-        
         sock:send(msg.."\n")
       end
     end
