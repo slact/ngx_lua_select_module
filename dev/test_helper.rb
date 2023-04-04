@@ -85,16 +85,16 @@ module TestHelp
     end
     
     def run
-      Async do
-        @endpoint.bind do |server, server_task|
-          @task = server_task
+      Async do |task|
+        @task = task
+        @endpoint.bind do |server|
           #Console.logger.info(server) {"Accepting connections on #{server.local_address.inspect}"}
           @server = server
           @host = server.local_address.ip_address
           @port = server.local_address.ip_port
           @server.listen 128
           @locks.unlock :ready
-          @server.accept(task: @task) do |socket|
+          @server.accept_each(task: @task) do |socket|
             if @no_more_clients then
               @error = "A client tried to connect when the server isn't expecting any more"
               close
@@ -103,9 +103,10 @@ module TestHelp
               @client_queue << client
               client.wait :finished
             end
-            
           end
           @locks.unlock :finished
+        rescue Async::Wrapper::Cancelled => e
+          @locks.unlock(:finished) if @locks.locked?(:finished)
         end
       end
       self
