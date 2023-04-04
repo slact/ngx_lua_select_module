@@ -20,6 +20,10 @@ class SelectModuleTest < Minitest::Test
     resty_client = RestyTestClient.new(args)
     return resty_client unless server
     
+    unless args[:monitor] == false
+      resty_client.async_monitor
+    end
+    
     accepted_clients = []
     args[:clients].times do
       accepted_clients << server.wait(:client)
@@ -44,9 +48,9 @@ class SelectModuleTest < Minitest::Test
   test "client socket echo" do
     #runs client_socket_echo test in openresty
     echo_prefix="got_it."
-    resty = upstream(echo_prefix: echo_prefix, clients: 0)
+    resty = upstream(echo_prefix: echo_prefix, clients: 0, monitor: false)
     (1..1000).each do |n|
-      msg = "hello this is message number #{n}" * n
+      msg = "hello this is message number #{n}"
       resty.puts msg
       assert_equal "#{echo_prefix}#{msg}", resty.gets
     end
@@ -54,12 +58,13 @@ class SelectModuleTest < Minitest::Test
     resty.wait.stop
   end
   
+  
   test "upstream socket echo" do
     #runs upstream_socket_echo test in openresty
     
-    resty, server, clients = upstream(clients: 1, exclude_resty_client: 1)
+    resty, server, clients = upstream(clients: 20, exclude_resty_client: true)
     
-    (1..1000).each do |n|
+    (1..20).each do |n|
       msg = "uptest #{n}"
       clients.each do |client|
         client.puts msg

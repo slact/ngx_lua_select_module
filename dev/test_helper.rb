@@ -11,6 +11,7 @@ require "minitest/autorun"
 require "pry"
 require "binding_of_caller"
 require "json"
+require "ostruct"
 
 class BetterSpecReporter < Minitest::Reporters::SpecReporter                                                                           
   def before_test(test)                                                                                                                
@@ -216,6 +217,9 @@ module TestHelp
     def read(n)
       @stream.read(n)
     end
+    def read_exactly(n)
+      @stream.read_exactly(n)
+    end
     def gets
       @stream.gets
     end
@@ -290,6 +294,54 @@ module TestHelp
         raise "Bad handshake reply #{reply}"
       end
     end
+    
+    def async_monitor
+      @monitor_thread = @client_task.async do
+        monitor
+      rescue Async::Wrapper::Cancelled
+      end
+    end
+    
+    private def receive_status_message
+      line = self.gets
+      if not line then
+        raise "failed to receive status message line"
+      end
+      m = line.match(/^!(?<type>\w+)(\[(?<length>\d+)\])?(?<space>\s)?(?<data>.*)$/)
+      if m[:length]
+        data = self.read_exactly(m[:length].to_i + 1)
+        data = data[0..-2]
+      elsif m[:space].length == 0
+        buf = []
+        while true do
+          line = self.gets
+          break if line.length == 0
+          buf << line
+        end
+        data = buf.join("\n")
+      else
+        data = m[:data]
+      end
+      OpenStruct.new(type: m[:type].to_sym, data: data)
+    end
+    
+    def monitor
+      while true do
+        status = receive_status_message
+        case status.type
+        when :ERR
+          raise "openresty error: #{status.data}"
+        when :DEBUG
+          puts "DEBUG: #{status.data}"
+        when :FAIL
+          e = Minitest::Assertion.new(status.data)
+          e.set_backtrace []
+          raise e
+        else
+          raise "Unexpected monitor message: #{status}"
+        end
+      end
+    end
   end
   
   attr_reader :task, :current_test_name
@@ -319,10 +371,14 @@ module TestHelp
               @task = t
               instance_exec(t, &block)
             end
+          rescue Async::Stop => e
+            #that's ok
           rescue Async::TimeoutError => e
-            assert false, "timeout: #{e.message}"
+            flunk "timeout: #{e.message}"
           rescue Minitest::Assertion => e
-            raise => e
+            raise e
+          rescue SystemCallError => e
+            flunk "#{e.class}: #{e.message}"
           rescue Exception => e
             Console.logger.warn(self, e)
             failure = MiniTest::Assertion.new("#{e.class}: #{e.message}")

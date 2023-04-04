@@ -2,21 +2,11 @@ local ngx_select = require "ngx.select"
 local cjson = require "cjson"
 local mm = require "mm"
 local clientsock = assert(ngx.req.socket(true))
---local upsock = ngx.socket.tcp()
---assert(upsock:connect("127.0.0.1", 8092))
-
+local Msgbuf
 --upsock:settimeouts(2, 2, 1)
 clientsock:settimeouts(100, 30, 1)
 
 local DEFAULT_SELECT_TIMEOUT = 1000
-
-local event, err
-
---mm({udp=udpsock, clientsock=clientsock, upsock=upsock, ngx_socket=ngx.socket})
---upsock:send("say hello please\n")
---local data, err = upsock:receiveany(1024)
---upsock:send(tostring(data) .. ":"..tostring(err))
---upsock:send("thanks!\n")
 
 local function ngx_log(level, ...)
   local t = {}
@@ -40,9 +30,7 @@ local function create_select_table(arg)
     upsock:settimeouts(1000, 300, 1)
     local ok, err = upsock:connect(arg.upstream_host, arg.upstream_port)
     if not ok then
-      local msg = "!ERR failed to connect to upstream at " .. arg.upstream_host .. ":" .. arg.upstream_port
-      clientsock:send(msg)
-      error(msg)
+      error("failed to connect to upstream at " .. arg.upstream_host .. ":" .. arg.upstream_port)
     end
     table.insert(upsocks, upsock)
     select_table[upsock]='r'
@@ -69,20 +57,17 @@ function tests.client_socket_echo(arg)
       sockmsg[sock], err = sock:receive("*l")
       --log_err("GOT MSG:", sockmsg[sock])
       if err then
-        log_err("got receive() error for socket", sock, ":", err)
-        return
+        error("got receive() error for socket " .. tostring(sock) .. ":" .. err)
       end
       
       if sockmsg[clientsock] == "!FIN" then
-        clientsock:send("!FIN\n")
         return
       end
       
       for sock, msg in pairs(sockmsg) do
         res, err = sock:send(tostring(arg.echo_prefix)..msg.."\n")
         if err then
-          log_err("failed to send response to", tostring(sock))
-          return
+          error("failed to send response to" .. tostring(sock))
         end
       end
     end
@@ -91,18 +76,26 @@ end
 
 function tests.upstream_socket_echo(arg)
   local select_read = create_select_table(arg)
-  
   while true do
     local socks, err = ngx_select(select_read, arg.select_timeout)
     if err then
-      log_err("got select() error:", err)
-      return
+      error("got select() error:", err)
     end
     for _, sock in ipairs(socks) do
       local msg, err = sock:receive("*l")
       if not msg then
-        log_err("no message. ERR:", err)
+        if err ~= "timeout" then
+          error("no message. sock:" .. tostring(sock).. "err:" .. tostring(err))
+        end
+      elseif msg == "!FIN" then
+        return
       else
+        sock:send(msg.."\n")
+      end
+    end
+  end
+end
+
         if msg == "!FIN" then
           clientsock:send("!FIN\n")
           return
@@ -114,7 +107,11 @@ function tests.upstream_socket_echo(arg)
   end
 end
 
-local Msgbuf = { __index = {
+Msgbuf = { 
+  new = function()
+    return setmetatable({}, Msgbuf)
+  end,
+  __index = {
   chunksize=256,
   append = function(self, data)
     if not self.buf then
@@ -124,11 +121,11 @@ local Msgbuf = { __index = {
       self.buf = self.buf .. data
     end
   end,
-  receive = function(self, socket)
+  receiveany = function(self, socket)
     local data, err = socket:receiveany(self.chunksize)
     if err == "timeout" then
       if not self.ignore_timeout then
-        error("unexpected socket timeout for " .. tostring(socket))
+        return nil, err
       end
     elseif err then
       assert(not data, "should have no data")
@@ -144,7 +141,7 @@ local Msgbuf = { __index = {
   each_message = function(self)
     local messages = {}
     for line, newline in (self.buf or ""):gmatch("([^\n]*)(\n?)") do
-      if line and newline then
+      if line and newline and #newline > 0 then
         table.insert(messages, line)
       elseif not newline then
         assert(unfinished_line==nil)
@@ -178,7 +175,9 @@ local function run_test(clientsock)
       break
     end
   end
-  mm(args)
+  if not args.select_timeout then
+    args.select_timeout = DEFAULT_SELECT_TIMEOUT
+  end
   
   local test_handler_name, test_description = testname:match("^([^:]+):?%s*(.*)$")
   if test_description and #test_description > 0 then
@@ -191,6 +190,11 @@ local function run_test(clientsock)
     error("no such test: " .. testname)
   end
   clientsock:send("!RUN ".. testname .."\n")
-  test_handler(args)
+  xpcall(function() test_handler(args) end, function(err)
+    local err_status = "!FAIL["..#tostring(err).."]\n"..err.."\n"
+    clientsock:send(err_status)
+    ngx.log(ngx.ERR, "Error in test " .. testname .. ": " .. debug.traceback(err))
+    sleep(5)
+  end)
 end
 run_test(clientsock)
