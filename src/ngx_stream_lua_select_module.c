@@ -195,6 +195,8 @@ static int lua_select_module_select(lua_State *L) {
     ctx->socket[i].connection = c;
     
     ctx->socket[i].type = ngx_lua_select_get_socket_type(L, ctx->socket[i].lua_socket_ref, c, r->connection);
+    ctx->socket[i].read_ready = 0;
+    ctx->socket[i].write_ready = 0;
   }
 
   char *err;
@@ -258,9 +260,6 @@ static int lua_select_module_select(lua_State *L) {
         return luaL_argerror(L, 1, "UDP sockets not yet supported");
         break;
     }
-    
-    ctx->socket[i].read_ready = 0;
-    ctx->socket[i].write_ready = 0;
   }
   
   if(timeout > 0) {
